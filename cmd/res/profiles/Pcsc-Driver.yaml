@@ -1,0 +1,23 @@
+apiVersion: "v2"
+name: "Pcsc-Device"
+manufacturer: "Snowball Tech."
+model: "U-Safe"
+labels:
+  - "pcsc"
+description: "Example of Pcsc-Device"
+
+deviceResources:
+  -
+    name: "Apdu"
+    isHidden: false
+    description: "Send Apdu to U-Safe."
+    properties:
+        valueType: "Object"
+        readWrite: "RW"
+deviceCommands:
+  -
+    name: "SendApdu"
+    isHidden: false
+    readWrite: "RW"
+    resourceOperations:
+      - { deviceResource: "Apdu" }

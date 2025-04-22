@@ -1,0 +1,36 @@
+Writable:
+  LogLevel: DEBUG
+#  Reading:
+#    ReadingUnits: true
+#  Telemetry:
+#    Metrics:
+#      # All service's custom metric names must be present in this list. All common metric names are in the Common Config
+#      ReadCommandsExecuted: true
+Service:
+#  Host: "172.16.0.50"
+#  Port: 9999
+  Host: localhost
+  Port: 59999 # Device service are assigned the 599xx range
+  StartupMsg: pcsc device started
+
+MessageBus:
+  Optional:
+    ClientId: device-simple
+
+# Example overriding of Common Config settings
+Device:
+  AsyncBufferSize: 1
+  # These have common values (currently), but must be here for service local env overrides to apply when customized
+  ProfilesDir: ./res/profiles
+  DevicesDir: ./res/devices
+  # Only needed if device service implements auto provisioning
+  ProvisionWatchersDir: ./res/provisionwatchers
+  Discovery:
+    Enabled: true
+    Interval: "10s"
+# Example structured custom configuration
+PcscCustom:
+#  OnImageLocation: ./res/on.png
+#  OffImageLocation: ./res/off.jpg
+  Writable:
+    DiscoverSleepDurationSecs: 3
