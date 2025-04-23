@@ -6,4 +6,4 @@ deviceList:
       - industrial
     protocols:
       pcsc:
-        Atr: "default Atr"
+        SerialNumber: "default SerialNumber"

@@ -1,0 +1,21 @@
+name: Pcsc-Provision-Watcher
+serviceName: pcsc-device-hsm
+labels:
+  - pcsc-watcher
+identifiers:
+  SerialNumber: .+
+#blockingIdentifiers:
+#  Port:
+#    - 397
+#    - 398
+#    - 399
+adminState: UNLOCKED
+discoveredDevice:
+  profileName: Pcsc-Device
+  adminState: UNLOCKED
+#  autoEvents:
+#    - interval: 15s
+#      sourceName: SwitchButton
+  properties:
+    deviceSelfSerialNumber: weather
+

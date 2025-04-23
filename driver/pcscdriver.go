@@ -11,6 +11,7 @@ package driver
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -175,7 +176,7 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 			s.lc.Debugf("r-apdu: % x", result)
 			cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
 		}
-		//若res最终实际为空导致无法生成event，将会导致程序空指针崩溃
+		//若res最终实际为空导致无法生成event，将会导致程序空指针崩溃，todo需沟通如何传递DeviceResourceName值不支持的情况，指令解析异常的情况，
 		res = append(res, cv)
 	}
 
@@ -215,7 +216,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 
 				cmds, err = s.parseApdus(s.apdu)
 				if err != nil {
-					s.lc.Warn("parse apdus error: ", err)
+					s.lc.Warnf("parse apdus error: ", err)
 					return err
 				}
 				if cmds == nil {
@@ -224,29 +225,44 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 					s.lc.Warn("apdus is nil, stop execution")
 					return errors.New("empty apdus")
 				}
+				//s.lc.Debugf("cmds.len:%v", len(cmds))
+				//l := len(cmds)
 				cmdsResults = make([][]byte, len(cmds))
 				//cmd := []byte(s.apdu)
 				//var cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
-				s.lc.Info("Transmit c-apdu: ", cmds)
+				s.lc.Infof("Transmit c-apdu: ", cmds)
 				reader, b := s.getSerialNumberMap(deviceName)
+				//todo 上线前应当去除
+				if !b {
+					s.lc.Infof("s.getSerialNumberMap 空 %s", deviceName)
+					reader = "Snowball UKey 0"
+					b = true
+				}
 				if b {
 					card, err := s.client.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
-					defer card.Disconnect(scard.ResetCard)
+					//defer card.Disconnect(scard.ResetCard)
 					if err != nil {
 						s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
-						card.Disconnect(scard.ResetCard)
+						//可能没获取到card连接，card为空，若不判断会有空指针问题
+						if card != nil {
+							card.Disconnect(scard.ResetCard)
+						}
 						return err
 					}
+					cmdsResults = make([][]byte, len(cmds))
 					for index, cmd := range cmds {
-						cmdsResults[index], err = card.Transmit(cmd)
+						result, err := card.Transmit(cmd)
+						//cmdsResults[index] = make([]byte, len(result))
+						cmdsResults[index] = result
 						if err != nil {
-							s.lc.Warn("Device ", deviceName, " Transmit Apdu err:", err)
+							s.lc.Warnf("Device ", deviceName, " Transmit Apdu err:", err)
 							break
 						}
 					}
-					s.lc.Info("r-apdu:", cmdsResults)
+					card.Disconnect(scard.ResetCard)
+					s.lc.Infof("r-apdu:", cmdsResults)
 				} else {
-					//todo 此处应该重新获取s.serialNumberMap的真实值更好
+					//todo 此处应该重新获取实际连到宿主机的设备来替代s.serialNumberMap
 					s.lc.Warnf("no device:%s in devices list%s", deviceName, s.serialNumberMap)
 				}
 				cv, _ := sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeObject, cmdsResults)
@@ -255,6 +271,11 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 					CommandValues: []*sdkModels.CommandValue{cv},
 				}
 				s.asyncCh <- asyncValues
+			}
+		default:
+			{
+				s.lc.Warnf("no such DeviceResourceName%s", req.DeviceResourceName)
+				return errors.New("no such DeviceResourceName")
 			}
 		}
 	}
@@ -281,6 +302,7 @@ func (s *PcscDriver) Start() error {
 
 // AddDevice is a callback function that is invoked
 // when a new Device associated with this Device Service is added
+// MetadataSystemEventsCallback中监听messagebus中的DeviceSystemEventType
 func (s *PcscDriver) AddDevice(deviceName string, protocols map[string]models.ProtocolProperties, adminState models.AdminState) error {
 	s.lc.Debugf("a new Device is added: %s", deviceName)
 	return nil
@@ -288,6 +310,7 @@ func (s *PcscDriver) AddDevice(deviceName string, protocols map[string]models.Pr
 
 // UpdateDevice is a callback function that is invoked
 // when a Device associated with this Device Service is updated
+// MetadataSystemEventsCallback中监听messagebus中的DeviceSystemEventType
 func (s *PcscDriver) UpdateDevice(deviceName string, protocols map[string]models.ProtocolProperties, adminState models.AdminState) error {
 	s.lc.Debugf("Device %s is updated", deviceName)
 	return nil
@@ -295,6 +318,7 @@ func (s *PcscDriver) UpdateDevice(deviceName string, protocols map[string]models
 
 // RemoveDevice is a callback function that is invoked
 // when a Device associated with this Device Service is removed
+// MetadataSystemEventsCallback中监听messagebus中的DeviceSystemEventType
 func (s *PcscDriver) RemoveDevice(deviceName string, protocols map[string]models.ProtocolProperties) error {
 	s.lc.Debugf("Device %s is removed", deviceName)
 	return nil
@@ -312,13 +336,13 @@ func (s *PcscDriver) Discover() error {
 	// List available readers
 	readers, err := pcscResourceManagerContext.ListReaders()
 	switch err {
-	case scard.ErrSuccess:
+	case scard.ErrSuccess, nil:
 		{
 		}
 	default:
 		{
 			ctx, err2 := scard.EstablishContext()
-			if err != nil {
+			if err2 != nil {
 				s.lc.Warnf("Fail to list Readers,err:%s,and hard to recover by geting pcsc ResourceManager,err:%s", err, err2)
 				return err
 			}
@@ -390,16 +414,12 @@ func (s *PcscDriver) Discover() error {
 }
 
 func (s *PcscDriver) ValidateDevice(device models.Device) error {
-	protocol, ok := device.Protocols["pcsc"]
+	pcsc, ok := device.Protocols["pcsc"]
 	if !ok {
 		return errors.New("missing 'pcsc' protocols")
 	}
-
-	addr, ok := protocol["Atr"]
-	if !ok {
-		return errors.New("missing 'Atr' information")
-	} else if addr == "" {
-		return errors.New("Atr must not empty")
+	if pcsc["SerialNumber"] == "" {
+		return errors.New("missing 'SerialNumber'")
 	}
 
 	return nil
@@ -452,7 +472,7 @@ func (s *PcscDriver) setStopProfileScan(device string, stop bool) {
 }
 func (s *PcscDriver) parseApdus(rawApdus interface{}) ([][]byte, error) {
 	var cmd [][]byte
-	switch rawApdus.(type) {
+	switch t := rawApdus.(type) {
 	case [][]byte:
 		{
 			cmd = rawApdus.([][]byte)
@@ -476,8 +496,17 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) ([][]byte, error) {
 				}
 			}
 		}
-	case string:
+	case []interface{}:
 		{
+			rawApduArray := rawApdus.([]interface{})
+			cmd = make([][]byte, len(rawApduArray))
+			for i, raw := range rawApduArray {
+				decodeString, _ := base64.StdEncoding.DecodeString(raw.(string))
+				cmd[i] = decodeString
+				//hexStr := hex.EncodeToString(decodeString)
+				//hex.DecodeString()
+			}
+			//base64.StdEncoding.DecodeString()
 			//all := strings.ReplaceAll(rawApdus.(string), " ", "")
 			//split := strings.Split(all, ",")
 			//cmd = make([]byte, len(split))
@@ -502,7 +531,10 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) ([][]byte, error) {
 		}
 	default:
 		{
-			s.lc.Warnf("parse apdu meet error,apdu:%s,err:%s", rawApdus, "type of apdus is not supported")
+			typeOf := reflect.TypeOf(rawApdus)
+
+			s.lc.Warnf("rawApdus typeOf:%v,typeOf.Elem():%v", typeOf, typeOf.Elem())
+			s.lc.Warnf("parse apdu meet error,apdu:%v,apdu-type:%v,err:%s", t, "type of apdus is not supported")
 			return nil, errors.New("type of apdus is not supported")
 		}
 	}
@@ -518,6 +550,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 		//todo想要确保释放，但是万一获取sn的连接释放成功后，烧录连接连通，此时的defer把烧录的释放掉了怎么办？
 		//defer card.Disconnect(scard.ResetCard)
 		if err != nil {
+			//todo应当对外通知此reader存在异常
 			s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
 			card.Disconnect(scard.ResetCard)
 			continue
@@ -539,6 +572,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 
 		_, err = card.Status()
 		if err != nil {
+			//todo应当对外通知此reader存在异常
 			s.lc.Warnf("reader:%s status err:%s", reader, err)
 			card.Disconnect(scard.ResetCard)
 			continue
@@ -555,6 +589,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 			s.lc.Infof("Transmit c-apdu: % x\n", cmd)
 			rsp, err := card.Transmit(cmd)
 			if err != nil {
+				//todo应当对外通知此reader存在异常
 				s.lc.Warnf("reader:%s Transmit apdu err:%s", reader, err)
 				card.Disconnect(scard.ResetCard)
 				break
@@ -566,8 +601,13 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 				if bytes.HasSuffix(rsp, []byte{0x90, 0x00}) {
 					//更新SN与reader映射，存在并发问题
 					serialNumber := hex.EncodeToString(rsp[0 : lenRsp-2])
-					s.setSerialNumberMap(serialNumber, reader)
-					serialNumberList[i] = serialNumber
+					//读取前后值是否一致，不一致需要更新，一致则不需要
+					if currentReader, b := s.getSerialNumberMap(serialNumber); b && currentReader == serialNumber {
+						serialNumberList[i] = ""
+					} else {
+						s.setSerialNumberMap(serialNumber, reader)
+						serialNumberList[i] = serialNumber
+					}
 				}
 			}
 		}
@@ -578,15 +618,17 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 	//此时设备要是又拔了会有问题，但是多少有点离谱
 	res := make([]sdkModels.DiscoveredDevice, 0, 1)
 	for _, serialNumber := range serialNumberList {
-		proto := make(map[string]models.ProtocolProperties)
-		proto["pcsc"] = map[string]any{"Atr": "default atr"}
-		res = append(res, sdkModels.DiscoveredDevice{
-			Name:        serialNumber,
-			Protocols:   proto,
-			Description: "found by discovery",
-			Labels:      []string{"auto-discovery"}})
+		if serialNumber != "" {
+			proto := make(map[string]models.ProtocolProperties)
+			proto["pcsc"] = map[string]any{"SerialNumber": serialNumber}
+			res = append(res, sdkModels.DiscoveredDevice{
+				Name:        serialNumber,
+				Protocols:   proto,
+				Description: "found by discovery",
+				Labels:      []string{"auto-discovery"}})
+		}
 	}
-	//todo下面3行的用来干嘛的？？？
+	//避免过于频繁的设备扫描,等待设备稳定,部分设备发现过程耗时较久
 	//time.Sleep(time.Duration(s.serviceConfig.PcscCustom.Writable.DiscoverSleepDurationSecs) * time.Second)
 	//PublishDeviceDiscoveryProgressSystemEvent用于发布设备发现进度的系统事件，50：表示当前设备发现的进度百分比，len(res)设备数量
 	//s.sdk.PublishDeviceDiscoveryProgressSystemEvent(50, len(res), "")

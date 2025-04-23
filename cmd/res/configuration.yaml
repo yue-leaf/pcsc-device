@@ -9,7 +9,7 @@ Writable:
 Service:
 #  Host: "172.16.0.50"
 #  Port: 9999
-  Host: localhost
+#  Host: localhost
   Port: 59999 # Device service are assigned the 599xx range
   StartupMsg: pcsc device started
 
@@ -27,7 +27,7 @@ Device:
   ProvisionWatchersDir: ./res/provisionwatchers
   Discovery:
     Enabled: true
-    Interval: "10s"
+    Interval: "30s"
 # Example structured custom configuration
 PcscCustom:
 #  OnImageLocation: ./res/on.png
