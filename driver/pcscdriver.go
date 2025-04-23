@@ -13,13 +13,13 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/ebfe/scard"
 	"github.com/edgexfoundry/device-simple/client"
 	"github.com/edgexfoundry/device-simple/config"
 	"github.com/edgexfoundry/go-mod-core-contracts/v4/common"
-	"go/types"
 	"reflect"
 	"sync"
 	"time"
@@ -35,12 +35,13 @@ import (
 const operationCounterName = "OperationCounter"
 
 type PcscDriver struct {
-	sdk             interfaces.DeviceServiceSDK
-	lc              logger.LoggingClient
-	stopDiscovery   stopDiscoveryState
-	stopProfileScan stopProfileScanState
-	asyncCh         chan<- *sdkModels.AsyncValues
-	deviceCh        chan<- []sdkModels.DiscoveredDevice
+	sdk              interfaces.DeviceServiceSDK
+	lc               logger.LoggingClient
+	stopDiscovery    stopDiscoveryState
+	stopProfileScan  stopProfileScanState
+	asyncCh          chan<- *sdkModels.AsyncValues
+	deviceCh         chan<- []sdkModels.DiscoveredDevice
+	cardConnectionCh map[string]chan<- *scard.Card
 	//可能有并发问题
 	apdu             any
 	snWLock          sync.RWMutex
@@ -49,6 +50,11 @@ type PcscDriver struct {
 	serviceConfig    *config.ServiceConfig
 	operationCounter gometrics.Counter
 }
+
+const (
+	READY = iota
+	Connecting
+)
 
 type stopDiscoveryState struct {
 	stop   bool
@@ -152,29 +158,37 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 		var cv *sdkModels.CommandValue
 		switch req.DeviceResourceName {
 		case "Apdu":
-			//cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeObject, s.apdus)
-			card, _ := s.client.Connect(deviceName, scard.ShareExclusive, scard.ProtocolAny)
-			defer card.Disconnect(scard.ResetCard)
-			var cmd []byte
-			switch s.apdu.(type) {
-			case []byte:
-				{
-					cmd = s.apdu.([]byte)
+			{
+				//cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeObject, s.apdus)
+				card, _ := s.client.Connect(deviceName, scard.ShareExclusive, scard.ProtocolAny)
+				defer closeCardConnection(card)
+				var cmd []byte
+				switch s.apdu.(type) {
+				case []byte:
+					{
+						cmd = s.apdu.([]byte)
+					}
 				}
+				//todo 上线前需清除
+				if cmd == nil {
+					cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
+				}
+				//cmd := []byte(s.apdu)
+				//var cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
+				s.lc.Debugf("Transmit c-apdu: % x", cmd)
+				result, err := card.Transmit(cmd)
+				if err != nil {
+					s.lc.Warn("Device ", deviceName, " Transmit Apdu err:", err)
+				}
+				s.lc.Debugf("r-apdu: % x", result)
+				cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
 			}
-			//todo 上线前需清除
-			if cmd == nil {
-				cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
+		default:
+			{
+				s.lc.Warnf("no such DeviceResourceName%s", req.DeviceResourceName)
+				return nil, errors.New("no such DeviceResourceName")
 			}
-			//cmd := []byte(s.apdu)
-			//var cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
-			s.lc.Debugf("Transmit c-apdu: % x", cmd)
-			result, err := card.Transmit(cmd)
-			if err != nil {
-				s.lc.Warn("Device ", deviceName, " Transmit Apdu err:", err)
-			}
-			s.lc.Debugf("r-apdu: % x", result)
-			cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
+
 		}
 		//若res最终实际为空导致无法生成event，将会导致程序空指针崩溃，todo需沟通如何传递DeviceResourceName值不支持的情况，指令解析异常的情况，
 		res = append(res, cv)
@@ -192,6 +206,7 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string]models.ProtocolProperties, reqs []sdkModels.CommandRequest,
 	params []*sdkModels.CommandValue) error {
 	var err error
+	var reqBody tempApdu
 	var cmds [][]byte
 	var cmdsResults [][]byte
 
@@ -209,16 +224,17 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				asyncValues := &sdkModels.AsyncValues{
 					DeviceName: deviceName,
 				}
+				fmt.Println("params[i].value", params[i].Value)
 				if s.apdu, err = params[i].ObjectValue(); err != nil {
 					s.lc.Warnf("PcscDriver.HandleWriteCommands; the data type of parameter should be Object, parameter: %s", params[i].String())
 					return err
 				}
-
-				cmds, err = s.parseApdus(s.apdu)
+				reqBody, err = s.parseApdus(s.apdu)
 				if err != nil {
 					s.lc.Warnf("parse apdus error: ", err)
 					return err
 				}
+				cmds = reqBody.Apdu
 				if cmds == nil {
 					//todo 上线前需清除
 					cmds = [][]byte{{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}}
@@ -240,12 +256,12 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				}
 				if b {
 					card, err := s.client.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
-					//defer card.Disconnect(scard.ResetCard)
+					//defer closeCardConnection(card)
 					if err != nil {
 						s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
 						//可能没获取到card连接，card为空，若不判断会有空指针问题
 						if card != nil {
-							card.Disconnect(scard.ResetCard)
+							closeCardConnection(card)
 						}
 						return err
 					}
@@ -259,13 +275,17 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 							break
 						}
 					}
-					card.Disconnect(scard.ResetCard)
+					closeCardConnection(card)
 					s.lc.Infof("r-apdu:", cmdsResults)
 				} else {
 					//todo 此处应该重新获取实际连到宿主机的设备来替代s.serialNumberMap
 					s.lc.Warnf("no device:%s in devices list%s", deviceName, s.serialNumberMap)
 				}
-				cv, _ := sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeObject, cmdsResults)
+				result := map[string]interface{}{
+					"ApduResult": cmdsResults,
+					"RequestId":  reqBody.RequestId,
+				}
+				cv, _ := sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeObject, result)
 				asyncValues = &sdkModels.AsyncValues{
 					DeviceName:    deviceName,
 					CommandValues: []*sdkModels.CommandValue{cv},
@@ -378,7 +398,7 @@ func (s *PcscDriver) Discover() error {
 				fmt.Println("连接卡失败", readers[index])
 				return err
 			}
-			defer card.Disconnect(scard.ResetCard)
+			defer closeCardConnection(card)
 
 			fmt.Println("Card status:")
 			//获取卡状态scard.CardStatus
@@ -470,64 +490,90 @@ func (s *PcscDriver) setStopProfileScan(device string, stop bool) {
 	s.stopProfileScan.stop[device] = stop
 	s.lc.Debugf("set stopProfileScan to %v", stop)
 }
-func (s *PcscDriver) parseApdus(rawApdus interface{}) ([][]byte, error) {
-	var cmd [][]byte
-	switch t := rawApdus.(type) {
-	case [][]byte:
-		{
-			cmd = rawApdus.([][]byte)
-		}
-	case types.Array:
-		{
-			apdus := rawApdus.([]interface{})
-			cmd = make([][]byte, len(apdus))
 
-			for i, apdu := range apdus {
-				switch apdu.(type) {
-				case []byte:
-					{
-						cmd[i] = apdu.([]byte)
-					}
-				default:
-					{
-						s.lc.Warnf("parse apdu meet error,apdu:%s,err:%s", rawApdus, "some type of apdu in apdus are wrong")
-						return nil, errors.New("some type of apdu in apdus are wrong")
+type tempApdu struct {
+	Apdu      [][]byte `json:"Apdu"`
+	RequestId string   `json:"requestId"`
+}
+
+func (s *PcscDriver) parseApdus(rawApdus interface{}) (tempApdu, error) {
+	var temp tempApdu
+	//var cmd [][]byte
+	switch t := rawApdus.(type) {
+	/*	case [][]byte:
+			{
+				cmd = rawApdus.([][]byte)
+			}
+		case types.Array:
+			{
+				apdus := rawApdus.([]interface{})
+				cmd = make([][]byte, len(apdus))
+
+				for i, apdu := range apdus {
+					switch apdu.(type) {
+					case []byte:
+						{
+							cmd[i] = apdu.([]byte)
+						}
+					default:
+						{
+							s.lc.Warnf("parse apdu meet error,apdu:%s,err:%s", rawApdus, "some type of apdu in apdus are wrong")
+							return nil, errors.New("some type of apdu in apdus are wrong")
+						}
 					}
 				}
 			}
-		}
-	case []interface{}:
+
+
+		case []interface{}:
+			{
+				rawApduArray := rawApdus.([]interface{})
+				cmd = make([][]byte, len(rawApduArray))
+				for i, raw := range rawApduArray {
+					decodeString, _ := base64.StdEncoding.DecodeString(raw.(string))
+					cmd[i] = decodeString
+					//hexStr := hex.EncodeToString(decodeString)
+					//hex.DecodeString()
+				}
+				//base64.StdEncoding.DecodeString()
+				//all := strings.ReplaceAll(rawApdus.(string), " ", "")
+				//split := strings.Split(all, ",")
+				//cmd = make([]byte, len(split))
+				//for i2, s2 := range split {
+				//	if strings.HasPrefix(s2, "0x") {
+				//		temp, err := strconv.ParseUint(s2[2:], 16, 8)
+				//		if err != nil {
+				//			s.lc.Warnf("parse apdu meet error,apdu:%s,err:%s", apdus, err)
+				//			return nil, err
+				//		}
+				//		cmd[i2] = uint8(temp)
+				//	} else {
+				//		temp, err := strconv.ParseUint(s2, 16, 8)
+				//		if err != nil {
+				//			s.lc.Warnf("parse apdu meet error,apdu:%s,err:%s", apdus, err)
+				//			return nil, err
+				//		}
+				//		cmd[i2] = uint8(temp)
+				//	}
+				//}
+				//s.lc.Debugf("parse string type apdu successfully,result:%v", cmd)
+			}*/
+	case string:
 		{
-			rawApduArray := rawApdus.([]interface{})
-			cmd = make([][]byte, len(rawApduArray))
-			for i, raw := range rawApduArray {
-				decodeString, _ := base64.StdEncoding.DecodeString(raw.(string))
-				cmd[i] = decodeString
-				//hexStr := hex.EncodeToString(decodeString)
-				//hex.DecodeString()
+
+			raw := rawApdus.(string)
+			body, _ := base64.StdEncoding.DecodeString(raw)
+
+			if err := json.Unmarshal(body, &temp); err != nil {
+				s.lc.Warnf("Unmarshal body meet error,body:%v,err:%s", body, err)
+				return temp, err
 			}
-			//base64.StdEncoding.DecodeString()
-			//all := strings.ReplaceAll(rawApdus.(string), " ", "")
-			//split := strings.Split(all, ",")
-			//cmd = make([]byte, len(split))
-			//for i2, s2 := range split {
-			//	if strings.HasPrefix(s2, "0x") {
-			//		temp, err := strconv.ParseUint(s2[2:], 16, 8)
-			//		if err != nil {
-			//			s.lc.Warnf("parse apdu meet error,apdu:%s,err:%s", apdus, err)
-			//			return nil, err
-			//		}
-			//		cmd[i2] = uint8(temp)
-			//	} else {
-			//		temp, err := strconv.ParseUint(s2, 16, 8)
-			//		if err != nil {
-			//			s.lc.Warnf("parse apdu meet error,apdu:%s,err:%s", apdus, err)
-			//			return nil, err
-			//		}
-			//		cmd[i2] = uint8(temp)
-			//	}
+			//cmd = make([][]byte, len(temp.Apdu))
+			//for i, rawApdu := range temp.Apdu {
+			//	decodeString, _ := base64.StdEncoding.DecodeString(string(rawApdu))
+			//	cmd[i] = decodeString
 			//}
-			//s.lc.Debugf("parse string type apdu successfully,result:%v", cmd)
+			//temp.Apdu = cmd
 		}
 	default:
 		{
@@ -535,10 +581,10 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) ([][]byte, error) {
 
 			s.lc.Warnf("rawApdus typeOf:%v,typeOf.Elem():%v", typeOf, typeOf.Elem())
 			s.lc.Warnf("parse apdu meet error,apdu:%v,apdu-type:%v,err:%s", t, "type of apdus is not supported")
-			return nil, errors.New("type of apdus is not supported")
+			return temp, errors.New("type of apdus is not supported")
 		}
 	}
-	return cmd, nil
+	return temp, nil
 
 }
 
@@ -548,11 +594,11 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 		//执行命令
 		card, err := ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
 		//todo想要确保释放，但是万一获取sn的连接释放成功后，烧录连接连通，此时的defer把烧录的释放掉了怎么办？
-		//defer card.Disconnect(scard.ResetCard)
+		//defer closeCardConnection(card)
 		if err != nil {
 			//todo应当对外通知此reader存在异常
 			s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
-			card.Disconnect(scard.ResetCard)
+			closeCardConnection(card)
 			continue
 		}
 
@@ -574,7 +620,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 		if err != nil {
 			//todo应当对外通知此reader存在异常
 			s.lc.Warnf("reader:%s status err:%s", reader, err)
-			card.Disconnect(scard.ResetCard)
+			closeCardConnection(card)
 			continue
 		}
 
@@ -591,7 +637,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 			if err != nil {
 				//todo应当对外通知此reader存在异常
 				s.lc.Warnf("reader:%s Transmit apdu err:%s", reader, err)
-				card.Disconnect(scard.ResetCard)
+				closeCardConnection(card)
 				break
 			}
 			s.lc.Infof("Transmit r-apdu: % x\n", rsp)
@@ -612,7 +658,8 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 			}
 		}
 		//fmt.Println(serialNumberMap)
-		card.Disconnect(scard.ResetCard)
+		closeCardConnection(card)
+		//closeCardConnection(card)
 	}
 	s.lc.Infof("the lastest devices list,%v", s.serialNumberMap)
 	//此时设备要是又拔了会有问题，但是多少有点离谱
@@ -650,3 +697,25 @@ func (s *PcscDriver) getSerialNumberMap(key string) (string, bool) {
 	s.snWLock.RUnlock()
 	return reader, ok
 }
+func closeCardConnection(card *scard.Card) {
+	if card != nil {
+		card.Disconnect(scard.ResetCard)
+	}
+}
+
+/*func (s *PcscDriver) getReadyCard(deviceName string) *scard.Card {
+	channel := s.cardConnectionCh[deviceName]
+	select {
+	case card := <-channel:
+
+	}
+}
+}
+func (s *PcscDriver) putReadyCard(deviceName string, card *scard.Card) {
+	channel := s.cardConnectionCh[deviceName]
+	select {
+	case channel <- card:
+
+	}
+}
+*/

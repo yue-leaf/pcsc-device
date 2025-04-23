@@ -14,6 +14,9 @@ deviceResources:
     properties:
         valueType: "Object"
         readWrite: "RW"
+    attributes:
+      { requestId: "default requestId" }
+
 deviceCommands:
   -
     name: "SendApdu"
