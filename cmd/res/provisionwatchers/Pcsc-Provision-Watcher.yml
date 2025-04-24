@@ -17,5 +17,6 @@ discoveredDevice:
 #    - interval: 15s
 #      sourceName: SwitchButton
   properties:
+#暂不需要
     deviceSelfSerialNumber: weather
 

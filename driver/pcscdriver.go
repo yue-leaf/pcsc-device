@@ -35,20 +35,20 @@ import (
 const operationCounterName = "OperationCounter"
 
 type PcscDriver struct {
-	sdk              interfaces.DeviceServiceSDK
-	lc               logger.LoggingClient
-	stopDiscovery    stopDiscoveryState
-	stopProfileScan  stopProfileScanState
-	asyncCh          chan<- *sdkModels.AsyncValues
-	deviceCh         chan<- []sdkModels.DiscoveredDevice
-	cardConnectionCh map[string]chan<- *scard.Card
+	sdk             interfaces.DeviceServiceSDK
+	lc              logger.LoggingClient
+	stopDiscovery   stopDiscoveryState
+	stopProfileScan stopProfileScanState
+	asyncCh         chan<- *sdkModels.AsyncValues       //框架自带，异步事件通知，可借此主动发送异步通知，可通过订阅mqtt的topic消费，topicName见框架的utils.SendEvent方法中
+	deviceCh        chan<- []sdkModels.DiscoveredDevice //框架自带，用于向框架（metadata）传递发现的新设备
+	readerCh        map[string]chan struct{}            //reader的轻量锁，通过管道传递可用reader，目的是解决Discover与执行业务请求，业务请求与业务请求间存在并发的通过reader获取card连接失败，导致出现card为nil值的问题
 	//可能有并发问题
-	apdu             any
-	snWLock          sync.RWMutex
-	serialNumberMap  map[string]string
-	client           *scard.Context
-	serviceConfig    *config.ServiceConfig
-	operationCounter gometrics.Counter
+	apdu                  any               //接收下游服务的请求参数（当前定义为json格式 Apdu:{Apdu:[][]byte,RequestId:""}）
+	snWLock               sync.RWMutex      //serialNumberReaderMap的专用锁snWLock
+	serialNumberReaderMap map[string]string //serialNumber为U-Safe内实例的唯一id，作为框架内的deviceName传递，Reader是操控读卡器的句柄，serialNumberReaderMap管理SN与读卡器名reader的映射关系
+	client                *scard.Context
+	serviceConfig         *config.ServiceConfig
+	operationCounter      gometrics.Counter
 }
 
 const (
@@ -73,10 +73,11 @@ func (s *PcscDriver) Initialize(sdk interfaces.DeviceServiceSDK) error {
 	s.lc = sdk.LoggingClient()
 	s.asyncCh = sdk.AsyncValuesChannel()
 	s.deviceCh = sdk.DiscoveredDeviceChannel()
+	s.readerCh = make(map[string]chan struct{}, 8)
 	s.serviceConfig = &config.ServiceConfig{}
 	s.stopProfileScan = stopProfileScanState{stop: make(map[string]bool)}
 	s.client = client.GetClient()
-	s.serialNumberMap = make(map[string]string, 8)
+	s.serialNumberReaderMap = make(map[string]string, 8)
 
 	if err := sdk.LoadCustomConfig(s.serviceConfig, "PcscCustom"); err != nil {
 		return fmt.Errorf("unable to load 'PcscCustom' custom configuration: %s", err.Error())
@@ -160,28 +161,51 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 		case "Apdu":
 			{
 				//cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeObject, s.apdus)
-				card, _ := s.client.Connect(deviceName, scard.ShareExclusive, scard.ProtocolAny)
-				defer closeCardConnection(card)
-				var cmd []byte
-				switch s.apdu.(type) {
-				case []byte:
-					{
-						cmd = s.apdu.([]byte)
+				//原实现
+				//card, _ := s.client.Connect(deviceName, scard.ShareExclusive, scard.ProtocolAny)
+				//defer closeCardConnection(card)
+				reader, b := s.getSerialNumberMap(deviceName)
+				//todo debug时，通过discover发现的设备老有缓存，为了便于调试没拿到的情况下先取一个用，上线前应当去除，并且调查清缓存的原因
+				//if !b {
+				//	s.lc.Infof("s.getSerialNumberMap 空 %s", deviceName)
+				//	reader = "Snowball UKey 0"
+				//	b = true
+				//}
+				if b {
+					//通过轻量锁控制实现
+					//todo 需要考虑因为所有device拔出后，client也就是pcscResourceManager丢失的情况
+					card := s.getReadyCard(reader, s.client)
+					if card == nil {
+						s.lc.Warnf("get ready card fail,reader:%s", reader)
+						s.putReadyCard(reader, card)
+						return nil, errors.New("get no ready card")
 					}
+
+					var cmd []byte
+					switch s.apdu.(type) {
+					case []byte:
+						{
+							cmd = s.apdu.([]byte)
+						}
+					}
+					//todo 上线前需清除
+					if cmd == nil {
+						cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
+					}
+					//cmd := []byte(s.apdu)
+					//var cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
+					s.lc.Debugf("Transmit c-apdu: % x", cmd)
+					result, err := card.Transmit(cmd)
+					if err != nil {
+						s.lc.Warn("Device ", deviceName, " Transmit Apdu err:", err)
+					}
+					s.lc.Debugf("r-apdu: % x", result)
+					cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
+				} else {
+					//todo 此处应该重新获取实际连到宿主机的设备来替代s.serialNumberMap
+					s.lc.Warnf("no device:%s in devices readers Map%s", deviceName, s.serialNumberReaderMap)
+					return nil, errors.New("no reader in devices readers Map")
 				}
-				//todo 上线前需清除
-				if cmd == nil {
-					cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
-				}
-				//cmd := []byte(s.apdu)
-				//var cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
-				s.lc.Debugf("Transmit c-apdu: % x", cmd)
-				result, err := card.Transmit(cmd)
-				if err != nil {
-					s.lc.Warn("Device ", deviceName, " Transmit Apdu err:", err)
-				}
-				s.lc.Debugf("r-apdu: % x", result)
-				cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
 			}
 		default:
 			{
@@ -206,7 +230,7 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string]models.ProtocolProperties, reqs []sdkModels.CommandRequest,
 	params []*sdkModels.CommandValue) error {
 	var err error
-	var reqBody tempApdu
+	var reqBody apduReqBody
 	var cmds [][]byte
 	var cmdsResults [][]byte
 
@@ -224,12 +248,12 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				asyncValues := &sdkModels.AsyncValues{
 					DeviceName: deviceName,
 				}
-				fmt.Println("params[i].value", params[i].Value)
 				if s.apdu, err = params[i].ObjectValue(); err != nil {
 					s.lc.Warnf("PcscDriver.HandleWriteCommands; the data type of parameter should be Object, parameter: %s", params[i].String())
 					return err
 				}
 				reqBody, err = s.parseApdus(s.apdu)
+				s.lc.Infof("receive RequestId:%s", reqBody.RequestId)
 				if err != nil {
 					s.lc.Warnf("parse apdus error: ", err)
 					return err
@@ -237,7 +261,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				cmds = reqBody.Apdu
 				if cmds == nil {
 					//todo 上线前需清除
-					cmds = [][]byte{{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}}
+					//cmds = [][]byte{{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}}
 					s.lc.Warn("apdus is nil, stop execution")
 					return errors.New("empty apdus")
 				}
@@ -248,23 +272,32 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				//var cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
 				s.lc.Infof("Transmit c-apdu: ", cmds)
 				reader, b := s.getSerialNumberMap(deviceName)
-				//todo 上线前应当去除
-				if !b {
-					s.lc.Infof("s.getSerialNumberMap 空 %s", deviceName)
-					reader = "Snowball UKey 0"
-					b = true
-				}
+				//todo debug时，通过discover发现的设备老有缓存，为了便于调试没拿到的情况下先取一个用，上线前应当去除，并且调查清缓存的原因
+				//if !b {
+				//	s.lc.Infof("getSerialNumberMap 空 %s", deviceName)
+				//	reader = "Snowball UKey 0"
+				//	b = true
+				//}
 				if b {
-					card, err := s.client.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
-					//defer closeCardConnection(card)
-					if err != nil {
-						s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
-						//可能没获取到card连接，card为空，若不判断会有空指针问题
-						if card != nil {
-							closeCardConnection(card)
-						}
-						return err
+					//通过轻量锁控制实现
+					//todo 需要考虑因为所有device拔出后，client也就是pcscResourceManager丢失的情况
+					card := s.getReadyCard(reader, s.client)
+					if card == nil {
+						s.lc.Warnf("RequestId:%s,get ready card fail", reqBody.RequestId)
+						s.putReadyCard(reader, card)
+						return errors.New("get no ready card")
 					}
+					//原实现
+					//card, err := s.client.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
+					//defer closeCardConnection(card)
+					//if err != nil {
+					//	s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
+					//	//可能没获取到card连接，card为空，若不判断会有空指针问题
+					//	if card != nil {
+					//		closeCardConnection(card)
+					//	}
+					//	return err
+					//}
 					cmdsResults = make([][]byte, len(cmds))
 					for index, cmd := range cmds {
 						result, err := card.Transmit(cmd)
@@ -275,11 +308,15 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 							break
 						}
 					}
-					closeCardConnection(card)
+					//通过轻量锁控制实现
+					s.putReadyCard(reader, card)
+					//原实现
+					//closeCardConnection(card)
 					s.lc.Infof("r-apdu:", cmdsResults)
 				} else {
 					//todo 此处应该重新获取实际连到宿主机的设备来替代s.serialNumberMap
-					s.lc.Warnf("no device:%s in devices list%s", deviceName, s.serialNumberMap)
+					s.lc.Warnf("no device:%s in devices readers Map%s", deviceName, s.serialNumberReaderMap)
+					return errors.New("no reader in devices readers Map")
 				}
 				result := map[string]interface{}{
 					"ApduResult": cmdsResults,
@@ -374,6 +411,15 @@ func (s *PcscDriver) Discover() error {
 			}
 		}
 	}
+	s.lc.Infof("find readers:%v", readers)
+	//通过readerCh作为轻量锁，来传递reader是否可用
+	for _, reader := range readers {
+		if _, ok := s.readerCh[reader]; !ok {
+			s.readerCh[reader] = make(chan struct{}, 1)
+			s.readerCh[reader] <- struct{}{}
+		}
+	}
+	//todo还需做到设备拔除后通知metatdata，防止下游获取到不可用设备
 	s.discoverSerialNumber(readers, pcscResourceManagerContext)
 	/*	fmt.Printf("Found %d readers:\n", len(readers))
 		for i, reader := range readers {
@@ -491,13 +537,13 @@ func (s *PcscDriver) setStopProfileScan(device string, stop bool) {
 	s.lc.Debugf("set stopProfileScan to %v", stop)
 }
 
-type tempApdu struct {
+type apduReqBody struct {
 	Apdu      [][]byte `json:"Apdu"`
-	RequestId string   `json:"requestId"`
+	RequestId string   `json:"RequestId"`
 }
 
-func (s *PcscDriver) parseApdus(rawApdus interface{}) (tempApdu, error) {
-	var temp tempApdu
+func (s *PcscDriver) parseApdus(rawApdus interface{}) (apduReqBody, error) {
+	var temp apduReqBody
 	//var cmd [][]byte
 	switch t := rawApdus.(type) {
 	/*	case [][]byte:
@@ -591,16 +637,19 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) (tempApdu, error) {
 func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) {
 	serialNumberList := make([]string, len(readers))
 	for i, reader := range readers {
+		//通过轻量锁控制实现
+		card := s.getReadyCard(reader, ctx)
+		//原实现
 		//执行命令
-		card, err := ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
-		//todo想要确保释放，但是万一获取sn的连接释放成功后，烧录连接连通，此时的defer把烧录的释放掉了怎么办？
-		//defer closeCardConnection(card)
-		if err != nil {
-			//todo应当对外通知此reader存在异常
-			s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
-			closeCardConnection(card)
-			continue
-		}
+		//card, err := ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
+		////todo想要确保释放，但是万一获取sn的连接释放成功后，烧录连接连通，此时的defer把烧录的释放掉了怎么办？
+		////defer closeCardConnection(card)
+		//if err != nil {
+		//	//todo应当对外通知此reader存在异常
+		//	s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
+		//	closeCardConnection(card)
+		//	continue
+		//}
 
 		//获取卡状态scard.CardStatus
 		//reader表示当前连接的智能卡读卡器的名称
@@ -616,11 +665,14 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 		//atr 智能卡 ATR（Answer To Reset）信息
 		//这是智能卡的复位应答信息。当智能卡上电或复位时，会发送一个 ATR 字节序列，其中包含了智能卡的一些基本信息，如制造商、卡类型、支持的协议等。通过分析 ATR 信息，可以了解智能卡的特性和能力。
 
-		_, err = card.Status()
+		_, err := card.Status()
 		if err != nil {
 			//todo应当对外通知此reader存在异常
 			s.lc.Warnf("reader:%s status err:%s", reader, err)
-			closeCardConnection(card)
+			//通过轻量锁控制实现
+			s.putReadyCard(reader, card)
+			//原实现
+			//closeCardConnection(card)
 			continue
 		}
 
@@ -637,7 +689,6 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 			if err != nil {
 				//todo应当对外通知此reader存在异常
 				s.lc.Warnf("reader:%s Transmit apdu err:%s", reader, err)
-				closeCardConnection(card)
 				break
 			}
 			s.lc.Infof("Transmit r-apdu: % x\n", rsp)
@@ -658,11 +709,13 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 			}
 		}
 		//fmt.Println(serialNumberMap)
-		closeCardConnection(card)
+		//通过轻量锁控制实现
+		s.putReadyCard(reader, card)
+		//原实现
 		//closeCardConnection(card)
 	}
-	s.lc.Infof("the lastest devices list,%v", s.serialNumberMap)
-	//此时设备要是又拔了会有问题，但是多少有点离谱
+	s.lc.Infof("the lastest devices list,%v", s.serialNumberReaderMap)
+	//todo此时设备要是又拔了会有问题，但是多少有点离谱
 	res := make([]sdkModels.DiscoveredDevice, 0, 1)
 	for _, serialNumber := range serialNumberList {
 		if serialNumber != "" {
@@ -688,12 +741,12 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 }
 func (s *PcscDriver) setSerialNumberMap(key string, value string) {
 	s.snWLock.Lock()
-	s.serialNumberMap[key] = value
+	s.serialNumberReaderMap[key] = value
 	s.snWLock.Unlock()
 }
 func (s *PcscDriver) getSerialNumberMap(key string) (string, bool) {
 	s.snWLock.RLock()
-	reader, ok := s.serialNumberMap[key]
+	reader, ok := s.serialNumberReaderMap[key]
 	s.snWLock.RUnlock()
 	return reader, ok
 }
@@ -703,19 +756,32 @@ func closeCardConnection(card *scard.Card) {
 	}
 }
 
-/*func (s *PcscDriver) getReadyCard(deviceName string) *scard.Card {
-	channel := s.cardConnectionCh[deviceName]
-	select {
-	case card := <-channel:
-
+func (s *PcscDriver) getReadyCard(reader string, ctx *scard.Context) *scard.Card {
+	channel := s.readerCh[reader]
+	var card *scard.Card
+	s.lc.Debugf("等待ReadyCard,reader:%s", reader)
+	//todo需要考虑是否可能存在一直挂起的情况
+	<-channel
+	s.lc.Debugf("成功获取ReadyCard,reader:%s", reader)
+	card, err := ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
+	//todo想要确保释放，但是万一获取sn的连接释放成功后，烧录连接连通，此时的defer把烧录的释放掉了怎么办？
+	//defer closeCardConnection(card)
+	if err != nil {
+		//todo应当对外通知此reader存在异常
+		s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
+		//通过轻量锁控制实现
+		s.putReadyCard(reader, card)
+		//原实现
+		//closeCardConnection(card)
 	}
+	return card
 }
-}
-func (s *PcscDriver) putReadyCard(deviceName string, card *scard.Card) {
-	channel := s.cardConnectionCh[deviceName]
-	select {
-	case channel <- card:
 
-	}
+func (s *PcscDriver) putReadyCard(reader string, card *scard.Card) {
+	channel := s.readerCh[reader]
+	//todo需考虑当前通过readerCh管理reader的方式是否还可能出现card为nil的情况，如果为nil应该如何处理？是否应该通过readerCh释放reader？
+	closeCardConnection(card)
+	s.lc.Debugf("card连接关闭,准备释放ReadyCard,reader:%s", reader)
+	channel <- struct{}{}
+	s.lc.Debugf("释放ReadyCard成功,reader:%s", reader)
 }
-*/

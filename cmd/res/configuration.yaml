@@ -7,7 +7,8 @@ Writable:
 #      # All service's custom metric names must be present in this list. All common metric names are in the Common Config
 #      ReadCommandsExecuted: true
 Service:
-#  Host: "172.16.0.50"
+#调试时需要将此设为本机ip不然会有异常，与其他非本机服务联调时不可使用localhost
+  Host: "172.16.0.54"
 #  Port: 9999
 #  Host: localhost
   Port: 59999 # Device service are assigned the 599xx range
