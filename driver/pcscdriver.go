@@ -270,7 +270,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				cmdsResults = make([][]byte, len(cmds))
 				//cmd := []byte(s.apdu)
 				//var cmd = []byte{0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
-				s.lc.Infof("Transmit c-apdu: ", cmds)
+				s.lc.Infof("Transmit c-apdu:%v ", cmds)
 				reader, b := s.getSerialNumberMap(deviceName)
 				//todo debug时，通过discover发现的设备老有缓存，为了便于调试没拿到的情况下先取一个用，上线前应当去除，并且调查清缓存的原因
 				//if !b {
@@ -309,11 +309,13 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 						}
 					}
 					//通过轻量锁控制实现
+					//todo部分情况下释放似乎很耗时
 					s.putReadyCard(reader, card)
 					//原实现
 					//closeCardConnection(card)
 					s.lc.Infof("r-apdu:", cmdsResults)
 				} else {
+					s.getAllSerialNumberReaderMap()
 					//todo 此处应该重新获取实际连到宿主机的设备来替代s.serialNumberMap
 					s.lc.Warnf("no device:%s in devices readers Map%s", deviceName, s.serialNumberReaderMap)
 					return errors.New("no reader in devices readers Map")
@@ -750,6 +752,13 @@ func (s *PcscDriver) getSerialNumberMap(key string) (string, bool) {
 	s.snWLock.RUnlock()
 	return reader, ok
 }
+
+func (s *PcscDriver) getAllSerialNumberReaderMap() {
+	s.snWLock.RLock()
+	s.lc.Infof("current SerialNumberReaderMap:%v", s.serialNumberReaderMap)
+	s.snWLock.RUnlock()
+}
+
 func closeCardConnection(card *scard.Card) {
 	if card != nil {
 		card.Disconnect(scard.ResetCard)
