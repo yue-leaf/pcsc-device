@@ -699,7 +699,8 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 				//if rsp[lenRsp-1]==0x90&&rsp[lenRsp-2]==0x00 {
 				if bytes.HasSuffix(rsp, []byte{0x90, 0x00}) {
 					//更新SN与reader映射，存在并发问题
-					serialNumber := hex.EncodeToString(rsp[0 : lenRsp-2])
+					//获取sn指令的响应结果为41tag+08长度+sn值+9000，应当截取sn值
+					serialNumber := hex.EncodeToString(rsp[2 : lenRsp-2])
 					//读取前后值是否一致，不一致需要更新，一致则不需要
 					if currentReader, b := s.getSerialNumberMap(serialNumber); b && currentReader == serialNumber {
 						serialNumberList[i] = ""
