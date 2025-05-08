@@ -27,7 +27,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
 
 ARG MAKE=make build
 
-WORKDIR /pcsc-device-hsm
+WORKDIR /app
 
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2023: Intel'
@@ -60,10 +60,9 @@ WORKDIR /
 #COPY --from=builder /pcsc-device-hsm/cmd/Attribution.txt /Attribution.txt
 #COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
-COPY --from=builder /pcsc-device-hsm/client /pcsc-device-hsm/client
-COPY --from=builder /pcsc-device-hsm/cmd /pcsc-device-hsm/cmd
-COPY --from=builder /pcsc-device-hsm/config /pcsc-device-hsm/config
-COPY --from=builder /pcsc-device-hsm/driver /pcsc-device-hsm/driver
+COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
+COPY --from=builder /app/pcsc-device-hsm /pcsc-device-hsm
+
 
 EXPOSE 59999
 
