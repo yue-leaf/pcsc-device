@@ -20,7 +20,9 @@ import (
 	"github.com/edgexfoundry/device-simple/client"
 	"github.com/edgexfoundry/device-simple/config"
 	"github.com/edgexfoundry/go-mod-core-contracts/v4/common"
+	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -398,11 +400,15 @@ func (s *PcscDriver) Discover() error {
 	case scard.ErrSuccess, nil:
 		{
 		}
+	case scard.ErrNoReadersAvailable:
+		{
+
+		}
 	default:
 		{
 			ctx, err2 := scard.EstablishContext()
 			if err2 != nil {
-				s.lc.Warnf("Fail to list Readers,err:%s,and hard to recover by geting pcsc ResourceManager,err:%s", err, err2)
+				s.lc.Warnf("Fail to list Readers,err:%s,and hard to recover by getting pcsc ResourceManager,err:%s", err, err2)
 				return err
 			}
 			pcscResourceManagerContext, s.client = ctx, ctx
@@ -421,7 +427,7 @@ func (s *PcscDriver) Discover() error {
 			s.readerCh[reader] <- struct{}{}
 		}
 	}
-	//todo还需做到设备拔除后通知metatdata，防止下游获取到不可用设备
+	//todo还需做到设备拔除后通知metadata，防止下游获取到不可用设备
 	s.discoverSerialNumber(readers, pcscResourceManagerContext)
 	/*	fmt.Printf("Found %d readers:\n", len(readers))
 		for i, reader := range readers {
@@ -637,7 +643,9 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) (apduReqBody, error) {
 }
 
 func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) {
+	lastestSerialNumberList := make([]string, len(readers))
 	serialNumberList := make([]string, len(readers))
+	oldserialNumberReaderMap := s.serialNumberReaderMap
 	for i, reader := range readers {
 		//通过轻量锁控制实现
 		card := s.getReadyCard(reader, ctx)
@@ -681,7 +689,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 		//读应用获取serial number
 		var cmds = [][]byte{
 			//选择应用
-			{0x00, 0xA4, 0x04, 0x00, 0x10, 0x49, 0x4F, 0x54, 0x5F, 0x41, 0x50, 0x50, 0x4C, 0x45, 0x54, 0x5F, 0x41, 0x49, 0x44, 0x00, 0x01},
+			{0x00, 0xA4, 0x04, 0x00, 0x0E, 0x49, 0x4F, 0x54, 0x5F, 0x41, 0x50, 0x50, 0x4C, 0x45, 0x54, 0x5F, 0x41, 0x49, 0x44},
 			//真正获取sn指令
 			{0x80, 0x02, 0x00, 0x00, 0x06, 0x41, 0x04, 0x00, 0x00, 0x00, 0x02},
 		}
@@ -701,12 +709,16 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 					//更新SN与reader映射，存在并发问题
 					//获取sn指令的响应结果为41tag+08长度+sn值+9000，应当截取sn值
 					serialNumber := hex.EncodeToString(rsp[2 : lenRsp-2])
+					serialNumber = strings.ToUpper(serialNumber)
 					//读取前后值是否一致，不一致需要更新，一致则不需要
-					if currentReader, b := s.getSerialNumberMap(serialNumber); b && currentReader == serialNumber {
-						serialNumberList[i] = ""
+					if currentReader, b := s.getSerialNumberMap(serialNumber); b && currentReader == reader {
+						//serialNumberList[i] = ""
+						serialNumberList[i] = serialNumber
+						lastestSerialNumberList[i] = serialNumber
 					} else {
 						s.setSerialNumberMap(serialNumber, reader)
 						serialNumberList[i] = serialNumber
+						lastestSerialNumberList[i] = serialNumber
 					}
 				}
 			}
@@ -717,7 +729,8 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 		//原实现
 		//closeCardConnection(card)
 	}
-	s.lc.Infof("the lastest devices list,%v", s.serialNumberReaderMap)
+
+	s.lc.Infof("the lastest devices list,%v", oldserialNumberReaderMap)
 	//todo此时设备要是又拔了会有问题，但是多少有点离谱
 	res := make([]sdkModels.DiscoveredDevice, 0, 1)
 	for _, serialNumber := range serialNumberList {
@@ -731,6 +744,22 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 				Labels:      []string{"auto-discovery"}})
 		}
 	}
+	//移除拔除设备
+	//todo还需管理channel
+	timeNow := time.Now().String()
+	for old, _ := range oldserialNumberReaderMap {
+		if !ContainElement[string](lastestSerialNumberList, old) {
+			proto := make(map[string]models.ProtocolProperties)
+			proto["pcsc"] = map[string]any{"SerialNumber": old}
+			res = append(res, sdkModels.DiscoveredDevice{
+				Name:        old,
+				Protocols:   proto,
+				Description: "removed by discovery",
+				Labels:      []string{"auto-discovery", "removed", timeNow}})
+			//cache.Dev
+			s.removeSerialNumberMap(old)
+		}
+	}
 	//避免过于频繁的设备扫描,等待设备稳定,部分设备发现过程耗时较久
 	//time.Sleep(time.Duration(s.serviceConfig.PcscCustom.Writable.DiscoverSleepDurationSecs) * time.Second)
 	//PublishDeviceDiscoveryProgressSystemEvent用于发布设备发现进度的系统事件，50：表示当前设备发现的进度百分比，len(res)设备数量
@@ -740,11 +769,17 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 	if len(res) > 0 {
 		s.deviceCh <- res
 	}
+	//s.deleteOldDevice(oldserialNumberReaderMap, serialNumberList)
 
 }
 func (s *PcscDriver) setSerialNumberMap(key string, value string) {
 	s.snWLock.Lock()
 	s.serialNumberReaderMap[key] = value
+	s.snWLock.Unlock()
+}
+func (s *PcscDriver) removeSerialNumberMap(key string) {
+	s.snWLock.Lock()
+	delete(s.serialNumberReaderMap, key)
 	s.snWLock.Unlock()
 }
 func (s *PcscDriver) getSerialNumberMap(key string) (string, bool) {
@@ -794,4 +829,26 @@ func (s *PcscDriver) putReadyCard(reader string, card *scard.Card) {
 	s.lc.Debugf("card连接关闭,准备释放ReadyCard,reader:%s", reader)
 	channel <- struct{}{}
 	s.lc.Debugf("释放ReadyCard成功,reader:%s", reader)
+}
+
+func ContainElement[T comparable](slice []T, element T) bool {
+	for _, s := range slice {
+		if s == element {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *PcscDriver) deleteOldDevice(old map[string]string, new []string) {
+	waitToDeleteCard := make([]string, 1)
+	for oldSN, _ := range old {
+		if ContainElement(new, oldSN) {
+			continue
+		} else {
+			waitToDeleteCard = append(waitToDeleteCard, oldSN)
+		}
+	}
+	baseUrl := "http://172.16.0.10:4000/core-metadata/api/v3/device/name/testDelete"
+	http.NewRequest("DELETE", baseUrl, nil)
 }

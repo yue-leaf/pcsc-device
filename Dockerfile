@@ -15,8 +15,15 @@
 # limitations under the License.
 #
 
-ARG BASE=golang:1.23-alpine3.20
+#ARG BASE=golang:1.23-alpine3.20
+ARG BASE=registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
 FROM ${BASE} AS builder
+
+ENV TZ=Asia/Shanghai
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+    apk update && \
+    apk add ca-certificates tzdata && \
+    rm -rf /var/cache/apk/*
 
 ARG MAKE=make build
 
@@ -34,13 +41,19 @@ COPY . .
 RUN ${MAKE}
 
 # Next image - Copy built Go binary into new workspace
-FROM alpine:3.20
+FROM registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2022: Intel'
 
-RUN apk add --update --no-cache dumb-init
-# Ensure using latest versions of all installed packages to avoid any recent CVEs
-RUN apk --no-cache upgrade
+ENV TZ=Asia/Shanghai
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+    apk update && \
+    apk add ca-certificates tzdata && \
+    rm -rf /var/cache/apk/*
+
+#RUN apk add --update --no-cache dumb-init
+## Ensure using latest versions of all installed packages to avoid any recent CVEs
+#RUN apk --no-cache upgrade
 
 WORKDIR /
 COPY --from=builder /device-simple/cmd/Attribution.txt /Attribution.txt
