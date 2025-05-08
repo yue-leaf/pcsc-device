@@ -57,9 +57,10 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
 #RUN apk --no-cache upgrade
 
 WORKDIR /
-COPY --from=builder /pcsc-device-hsm/cmd/Attribution.txt /Attribution.txt
-COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
-COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
+#COPY --from=builder /pcsc-device-hsm/cmd/Attribution.txt /Attribution.txt
+#COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
+#COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
+COPY --from=builder /pcsc-device-hsm/cmd/ /
 
 EXPOSE 59999
 
