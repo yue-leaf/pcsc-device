@@ -7,7 +7,7 @@ ENABLE_PIE=true
 
 ARCH=$(shell uname -m)
 
-MICROSERVICES=cmd/pcsc-device-hsm
+MICROSERVICES=pcsc-device-hsm
 .PHONY: $(MICROSERVICES)
 
 VERSION=$(shell cat ./VERSION 2>/dev/null || echo 0.0.0)
@@ -37,8 +37,8 @@ tidy:
 
 # CGO is enabled by default and cause docker builds to fail due to no gcc,
 # but is required for test with -race, so must disable it for the builds only
-cmd/pcsc-device-hsm:
-	CGO_ENABLED=0  go build $(GOFLAGS) -o $@ ./pcsc-device-hsm
+pcsc-device-hsm:
+	CGO_ENABLED=0  go build $(GOFLAGS) -o $@ ./
 
 docker:
 	docker build \
