@@ -1,5 +1,5 @@
 Writable:
-  LogLevel: DEBUG
+  LogLevel: INFO
 #  Reading:
 #    ReadingUnits: true
 #  Telemetry:
@@ -8,9 +8,9 @@ Writable:
 #      ReadCommandsExecuted: true
 Service:
 #调试时需要将此设为本机ip不然会有异常，与其他非本机服务联调时不可使用localhost
-  Host: "172.16.0.54"
+#  Host: "172.16.0.30"
 #  Port: 9999
-#  Host: localhost
+  Host: pcsc-device-hsm
   Port: 59999 # Device service are assigned the 599xx range
   StartupMsg: pcsc device started
 
