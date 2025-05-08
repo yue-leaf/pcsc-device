@@ -37,8 +37,8 @@ tidy:
 
 # CGO is enabled by default and cause docker builds to fail due to no gcc,
 # but is required for test with -race, so must disable it for the builds only
-cmd/device-simple:
-	CGO_ENABLED=0  go build $(GOFLAGS) -o $@ ./cmd/device-simple
+cmd/pcsc-device-hsm:
+	CGO_ENABLED=0  go build $(GOFLAGS) -o $@ ./pcsc-device-hsm
 
 docker:
 	docker build \
