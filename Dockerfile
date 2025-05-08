@@ -46,6 +46,7 @@ LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2022: Intel'
 
 ENV TZ=Asia/Shanghai
+ENV EDGEX_SECURITY_SECRET_STORE=false
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
     apk update && \
     apk add ca-certificates tzdata && \
@@ -57,7 +58,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
 
 WORKDIR /
 COPY --from=builder /pcsc-device-hsm/cmd/Attribution.txt /Attribution.txt
-COPY --from=builder /pcsc-device-hsm/cmd/device-simple /device-simple
+COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
 COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 
 EXPOSE 59999
