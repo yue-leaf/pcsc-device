@@ -7,7 +7,7 @@ ENABLE_PIE=true
 
 ARCH=$(shell uname -m)
 
-MICROSERVICES=cmd/device-simple
+MICROSERVICES=cmd/pcsc-device-hsm
 .PHONY: $(MICROSERVICES)
 
 VERSION=$(shell cat ./VERSION 2>/dev/null || echo 0.0.0)
@@ -30,7 +30,7 @@ ifeq ($(ENABLE_PIE), true)
 	GOFLAGS += -buildmode=pie
 endif
 
-build: $(MICROSER   VICES)
+build: $(MICROSERVICES)
 
 tidy:
 	go mod tidy
