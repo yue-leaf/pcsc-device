@@ -56,11 +56,11 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
 #RUN apk --no-cache upgrade
 
 WORKDIR /
-COPY --from=builder /device-simple/cmd/Attribution.txt /Attribution.txt
-COPY --from=builder /device-simple/cmd/device-simple /device-simple
-COPY --from=builder /device-simple/cmd/res/ /res
+COPY --from=builder /pcsc-device-hsm/cmd/Attribution.txt /Attribution.txt
+COPY --from=builder /pcsc-device-hsm/cmd/device-simple /device-simple
+COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 
 EXPOSE 59999
 
-ENTRYPOINT ["/device-simple"]
+ENTRYPOINT ["/pcsc-device-hsm"]
 CMD ["-cp=consul.http://edgex-core-consul:8500", "--registry"]
