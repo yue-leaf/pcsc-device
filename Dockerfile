@@ -16,21 +16,30 @@
 #
 
 #ARG BASE=golang:1.23-alpine3.20
-ARG BASE=registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
+ARG BASE=registry.cn-shanghai.aliyuncs.com/snowballtech/golang:1.23-alpine3.20
 FROM ${BASE} AS builder
 
-ENV TZ=Asia/Shanghai
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
-    apk update && \
-    apk add ca-certificates tzdata && \
-    rm -rf /var/cache/apk/*
+# 设置 Go 模块代理
+ENV GO111MODULE=on
+ENV GOPROXY=https://goproxy.cn,https://gocenter.io,https://goproxy.io,direct
+ENV GOPRIVATE=gitlab.snowballtech.com
 
+ARG ALPINE_PKG_BASE="make git"
+ARG ALPINE_PKG_EXTRA=""
+ARG ADD_BUILD_TAGS=""
 ARG MAKE=make build
+
+ENV TZ=Asia/Shanghai
+RUN apk add --update --no-cache ${ALPINE_PKG_BASE} ${ALPINE_PKG_EXTRA}
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+        apk update && \
+        apk add --no-cache git
 
 WORKDIR /app
 
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2023: Intel'
+LABEL Name=pcsc-device-hsm Version=${VERSION}
 
 RUN apk add --update --no-cache make git
 
