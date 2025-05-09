@@ -70,6 +70,11 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
     apk add ca-certificates tzdata && \
     rm -rf /var/cache/apk/*
 
+RUN apk add --update --no-cache ${ALPINE_PKG_BASE} ${ALPINE_PKG_EXTRA}
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+        apk update && \
+        apk add --no-cache pcsc-lite pcsc-lite-libs pcsc-lite-dev ccid \
+
 #RUN apk add --update --no-cache dumb-init
 ## Ensure using latest versions of all installed packages to avoid any recent CVEs
 #RUN apk --no-cache upgrade
