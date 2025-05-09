@@ -16,7 +16,8 @@
 #
 
 #ARG BASE=golang:1.23-alpine3.20
-ARG BASE=registry.cn-shanghai.aliyuncs.com/snowballtech/golang:1.23-alpine3.20
+#ARG BASE=registry.cn-shanghai.aliyuncs.com/snowballtech/golang:1.23-ubuntu20.04
+ARG BASE=registry.cn-shanghai.aliyuncs.com/kaokoco/golang:1.24.3-bullseye
 FROM ${BASE} AS builder
 
 # 设置 Go 模块代理
