@@ -39,6 +39,7 @@ tidy:
 # but is required for test with -race, so must disable it for the builds only
 pcsc-device-hsm:
 	CGO_ENABLED=0  go build $(GOFLAGS) -o $@ ./
+	chmod +x $@  # 确保builder阶段生成的文件可执行
 
 docker:
 	docker build \
