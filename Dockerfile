@@ -71,7 +71,8 @@ WORKDIR /
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
 COPY --from=builder /app/pcsc-device-hsm /pcsc-device-hsm
-
+# 在需要检查的位置添加
+RUN echo "当前目录结构:" && ls -alR /
 
 EXPOSE 59999
 
