@@ -48,6 +48,12 @@ RUN [ ! -d "vendor" ] && go mod download all || echo "skipping..."
 
 COPY . .
 RUN ${MAKE}
+# 查看构建输出（调试用）
+RUN apk add --no-cache tree && \
+    echo "构建输出文件结构:" && \
+    tree -L 5 /app && \
+    echo "确认可执行文件位置:" && \
+    find /app -name "pcsc-device-hsm"
 
 # Next image - Copy built Go binary into new workspace
 FROM registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
@@ -74,9 +80,10 @@ WORKDIR /
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
 COPY --from=builder /app/cmd/pcsc-device-hsm /pcsc-device-hsm/cmd/pcsc-device-hsm
-RUN apk add --no-cache tree
-# 查看文件结构（可选）
-RUN echo "当前目录结构:" && tree -L 5  # 显示3层深度
+# 查看最终镜像的文件结构（调试用）
+RUN apk add --no-cache tree && \
+    echo "最终镜像文件结构:" && \
+    tree -L 5 /pcsc-device-hsm
 
 
 EXPOSE 59999
