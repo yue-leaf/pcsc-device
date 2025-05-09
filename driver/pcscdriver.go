@@ -758,6 +758,10 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 				Labels:      []string{"auto-discovery", "removed", timeNow}})
 			//cache.Dev
 			s.removeSerialNumberMap(old)
+			//s.sdk.
+			if err := s.sdk.RemoveDeviceByName(old); err != nil {
+				s.lc.Warnf("remove device:%s meet err:%s", old, err)
+			}
 		}
 	}
 	//避免过于频繁的设备扫描,等待设备稳定,部分设备发现过程耗时较久
@@ -841,6 +845,7 @@ func ContainElement[T comparable](slice []T, element T) bool {
 }
 
 func (s *PcscDriver) deleteOldDevice(old map[string]string, new []string) {
+
 	waitToDeleteCard := make([]string, 1)
 	for oldSN, _ := range old {
 		if ContainElement(new, oldSN) {
