@@ -54,6 +54,9 @@ FROM registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2022: Intel'
 
+# 使用 Ubuntu 作为基础镜像
+#FROM ubuntu:20.04
+
 ENV TZ=Asia/Shanghai
 ENV EDGEX_SECURITY_SECRET_STORE=false
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
@@ -70,14 +73,11 @@ WORKDIR /
 #COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
-COPY --from=builder /app/pcsc-device-hsm /pcsc-device-hsm.bin
+COPY --from=builder /app/cmd/pcsc-device-hsm /pcsc-device-hsm/cmd/pcsc-device-hsm
 
-# 验证文件和目录结构
-RUN echo "验证文件结构:" && \
-    ls -al /pcsc-device-hsm.bin && \
-    ls -alR /pcsc-device-hsm
+
 
 EXPOSE 59999
 
-ENTRYPOINT ["/pcsc-device-hsm.bin"]
+ENTRYPOINT ["/pcsc-device-hsm/cmd/pcsc-device-hsm"]
 CMD ["-cp=keeper.http://edgex-core-keeper:59890", "--registry"]

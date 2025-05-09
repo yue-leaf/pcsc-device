@@ -6,6 +6,7 @@ ENABLE_FULL_RELRO=true
 ENABLE_PIE=true
 
 ARCH=$(shell uname -m)
+ENVOS=$(shell uname -s)
 
 MICROSERVICES=pcsc-device-hsm
 .PHONY: $(MICROSERVICES)
@@ -37,9 +38,13 @@ tidy:
 
 # CGO is enabled by default and cause docker builds to fail due to no gcc,
 # but is required for test with -race, so must disable it for the builds only
-pcsc-device-hsm:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o $@ ./
-	chmod +x $@  # 确保builder阶段生成的文件可执行
+$(MICROSERVICES):
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o ./cmd/$(MICROSERVICES)  ./cmd
+	chmod +x ./cmd/$(MICROSERVICES)  # 确保builder阶段生成的文件可执行
+# pcsc-device-hsm:
+# 	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o $@ ./
+# 	chmod +x $@  # 确保builder阶段生成的文件可执行
+
 
 docker:
 	docker build \
