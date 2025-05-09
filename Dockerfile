@@ -70,9 +70,14 @@ WORKDIR /
 #COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
-COPY --from=builder /app/pcsc-device-hsm /
+COPY --from=builder /app/pcsc-device-hsm /pcsc-device-hsm.bin
+
+# 验证文件和目录结构
+RUN echo "验证文件结构:" && \
+    ls -al /pcsc-device-hsm.bin && \
+    ls -alR /pcsc-device-hsm
 
 EXPOSE 59999
 
-ENTRYPOINT ["/pcsc-device-hsm"]
+ENTRYPOINT ["/pcsc-device-hsm.bin"]
 CMD ["-cp=keeper.http://edgex-core-keeper:59890", "--registry"]
