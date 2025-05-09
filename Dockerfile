@@ -67,8 +67,7 @@ ENV TZ=Asia/Shanghai
 ENV EDGEX_SECURITY_SECRET_STORE=false
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
     apk update && \
-    apk add ca-certificates tzdata && \
-    apk add pcsc-lite pcsc-lite-libs ccid \
+    apk add ca-certificates tzdata pcsc-lite pcsc-lite-libs ccid && \
     rm -rf /var/cache/apk/*
 
 #RUN apk add --update --no-cache dumb-init
