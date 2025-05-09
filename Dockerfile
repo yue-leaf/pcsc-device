@@ -74,7 +74,7 @@ WORKDIR /
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
 COPY --from=builder /app/cmd/pcsc-device-hsm /pcsc-device-hsm/cmd/pcsc-device-hsm
-RUN apt-get update && apt-get install -y tree
+RUN apk add --no-cache tree
 # 查看文件结构（可选）
 RUN echo "当前目录结构:" && tree -L 5  # 显示3层深度
 
