@@ -79,7 +79,7 @@ WORKDIR /
 #COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
 COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
-COPY --from=builder /app/cmd/pcsc-device-hsm /pcsc-device-hsm/cmd/pcsc-device-hsm
+COPY --from=builder /app/cmd/pcsc-device-hsm.bin /pcsc-device-hsm/cmd/pcsc-device-hsm.bin
 # 查看最终镜像的文件结构（调试用）
 RUN apk add --no-cache tree && \
     echo "最终镜像文件结构:" && \
@@ -88,5 +88,5 @@ RUN apk add --no-cache tree && \
 
 EXPOSE 59999
 
-ENTRYPOINT ["/pcsc-device-hsm/cmd/pcsc-device-hsm"]
+ENTRYPOINT ["/pcsc-device-hsm/cmd/pcsc-device-hsm.bin"]
 CMD ["-cp=keeper.http://edgex-core-keeper:59890", "--registry"]

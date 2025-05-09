@@ -39,8 +39,8 @@ tidy:
 # CGO is enabled by default and cause docker builds to fail due to no gcc,
 # but is required for test with -race, so must disable it for the builds only
 $(MICROSERVICES):
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o ./cmd/$(MICROSERVICES)  ./cmd
-	chmod +x ./cmd/$(MICROSERVICES)  # 确保builder阶段生成的文件可执行
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o ./cmd/$(MICROSERVICES).bin  ./cmd
+	chmod +x ./cmd/$(MICROSERVICES).bin  # 确保builder阶段生成的文件可执行
 # pcsc-device-hsm:
 # 	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o $@ ./
 # 	chmod +x $@  # 确保builder阶段生成的文件可执行
