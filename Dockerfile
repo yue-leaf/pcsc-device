@@ -33,8 +33,8 @@ ENV TZ=Asia/Shanghai
 RUN apk add --update --no-cache ${ALPINE_PKG_BASE} ${ALPINE_PKG_EXTRA}
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
         apk update && \
-        apk add --no-cache git gcc musl-dev
-
+        apk add --no-cache git gcc musl-dev pkg-config
+#RUN apk add --no-cache libpcsclite-dev
 WORKDIR /app
 
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
