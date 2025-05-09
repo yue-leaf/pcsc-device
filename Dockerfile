@@ -33,7 +33,7 @@ ENV TZ=Asia/Shanghai
 RUN apk add --update --no-cache ${ALPINE_PKG_BASE} ${ALPINE_PKG_EXTRA}
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
         apk update && \
-        apk add --no-cache git gcc musl-dev pkg-config
+        apk add --no-cache git gcc musl-dev pkgconfig pcsc-lite-dev
 #RUN apk add --no-cache libpcsclite-dev
 WORKDIR /app
 
