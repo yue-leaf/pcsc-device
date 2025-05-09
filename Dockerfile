@@ -56,7 +56,8 @@ RUN apk add --no-cache tree && \
     find /app -name "pcsc-device-hsm"
 
 # Next image - Copy built Go binary into new workspace
-FROM registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
+#FROM registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
+ARG BASE=registry.cn-shanghai.aliyuncs.com/snowballtech/golang:1.23-alpine3.20
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2022: Intel'
 
@@ -65,11 +66,18 @@ LABEL license='SPDX-License-Identifier: Apache-2.0' \
 
 ENV TZ=Asia/Shanghai
 ENV EDGEX_SECURITY_SECRET_STORE=false
+
+RUN apk add --update --no-cache ${ALPINE_PKG_BASE} ${ALPINE_PKG_EXTRA}
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
-    apk update && \
+        apk update && \
     apk add ca-certificates tzdata && \
-    apk add --no-cache git gcc musl-dev pkgconfig pcsc-lite pcsc-lite-libs pcsc-lite-dev ccid \
-    rm -rf /var/cache/apk/*
+    apk add --no-cache git gcc musl-dev pkgconfig pcsc-lite pcsc-lite-libs pcsc-lite-dev ccid
+
+#RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+#    apk update && \
+#    apk add ca-certificates tzdata && \
+#    apk add --no-cache git gcc musl-dev pkgconfig pcsc-lite pcsc-lite-libs pcsc-lite-dev ccid \
+#    rm -rf /var/cache/apk/*
 
 #RUN apk add --update --no-cache dumb-init
 ## Ensure using latest versions of all installed packages to avoid any recent CVEs
