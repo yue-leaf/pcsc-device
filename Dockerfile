@@ -68,7 +68,7 @@ ENV EDGEX_SECURITY_SECRET_STORE=false
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
     apk update && \
     apk add ca-certificates tzdata && \
-    apk add --no-cache pcsc-lite pcsc-lite-libs pcsc-lite-dev ccid \
+    apk add --no-cache git gcc musl-dev pkgconfig pcsc-lite pcsc-lite-libs pcsc-lite-dev ccid \
     rm -rf /var/cache/apk/*
 
 #RUN apk add --update --no-cache dumb-init
