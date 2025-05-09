@@ -5,8 +5,8 @@ ENABLE_FULL_RELRO=true
 # change the following boolean flag to enable or disable PIE for linux binaries which is needed for ASLR (Address Space Layout Randomization) on Linux, the ASLR support on Windows is enabled by default
 ENABLE_PIE=true
 
-ARCH=$(shell uname -m)
 ENVOS=$(shell uname -s)
+ARCH=$(shell uname -m)
 
 MICROSERVICES=pcsc-device-hsm
 .PHONY: $(MICROSERVICES)
@@ -39,11 +39,11 @@ tidy:
 # CGO is enabled by default and cause docker builds to fail due to no gcc,
 # but is required for test with -race, so must disable it for the builds only
 $(MICROSERVICES):
-	GOOS=$(ENVOS) GOARCH=$(ARCH) CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o ./cmd/$(MICROSERVICES).bin  ./cmd
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o ./cmd/$(MICROSERVICES).bin  ./cmd
 	chmod +x ./cmd/$(MICROSERVICES).bin  # 确保builder阶段生成的文件可执行
-# pcsc-device-hsm:
-# 	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o $@ ./
-# 	chmod +x $@  # 确保builder阶段生成的文件可执行
+# $(MICROSERVICES):
+# 	GOOS=$(ENVOS) GOARCH=$(ARCH) CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o ./cmd/$(MICROSERVICES).bin  ./cmd
+# 	chmod +x ./cmd/$(MICROSERVICES).bin  # 确保builder阶段生成的文件可执行
 
 
 docker:
