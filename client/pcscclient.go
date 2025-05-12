@@ -10,7 +10,7 @@ var client *scard.Context
 func init() {
 	ctx, err := scard.EstablishContext()
 	if err != nil {
-		_ = fmt.Errorf("初始化PcscClient失败,err:", err)
+		fmt.Println("初始化PcscClient失败,err:", err)
 		return
 	}
 	client = ctx
