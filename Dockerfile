@@ -85,6 +85,7 @@ RUN apk add --no-cache tree && \
     echo "最终镜像文件结构:" && \
     tree -L 5 /pcsc-device-hsm
 
+RUN usermod -aG scard 2002
 
 EXPOSE 59999
 
