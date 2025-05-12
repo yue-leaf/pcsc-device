@@ -74,7 +74,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
 ## Ensure using latest versions of all installed packages to avoid any recent CVEs
 #RUN apk --no-cache upgrade
 
-WORKDIR /
+WORKDIR /pcsc-device-hsm/cmd/
 #COPY --from=builder /pcsc-device-hsm/cmd/Attribution.txt /Attribution.txt
 #COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
 #COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
