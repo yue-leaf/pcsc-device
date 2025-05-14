@@ -1,9 +1,10 @@
-deviceList:
-  - name: Snowball UKey 0
-    profileName: Pcsc-Device
-    description: Example of Simple Device
-    labels:
-      - industrial
-    protocols:
-      pcsc:
-        SerialNumber: "default SerialNumber"
+#deviceList:
+#  - name: Snowball UKey 0
+##  - name: "410800003f00a1d522a6"
+#    profileName: Pcsc-Device
+#    description: Example of Simple Device
+#    labels:
+#      - industrial
+#    protocols:
+#      pcsc:
+#        SerialNumber: "default SerialNumber"

@@ -166,7 +166,6 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 				currCard, b := s.getSerialNumberMap(deviceName)
 				if b {
 					//通过轻量锁控制实现
-					//todo 需要考虑因为所有device拔出后，client也就是pcscResourceManager丢失的情况
 					card := s.getReadyCard(currCard.Reader, s.client)
 					if card == nil {
 						s.lc.Warnf("get ready card fail,reader:%v", currCard.Reader)
@@ -260,7 +259,6 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				currCard, b := s.getSerialNumberMap(deviceName)
 				if b {
 					//通过轻量锁控制实现
-					//todo 需要考虑因为所有device拔出后，client也就是pcscResourceManager丢失的情况
 					card := s.getReadyCard(currCard.Reader, s.client)
 					if card == nil {
 						s.lc.Warnf("RequestId:%s,get ready card fail", reqBody.RequestId)
@@ -273,7 +271,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 						//cmdsResults[index] = make([]byte, len(result))
 						cmdsResults[index] = result
 						if err != nil {
-							s.lc.Warnf("Device ", deviceName, " Transmit Apdu err:", err)
+							s.lc.Warnf("Device %s Transmit Apdu err:%v", deviceName, err)
 							break
 						}
 					}
@@ -802,8 +800,6 @@ func (s *PcscDriver) getReadyCard(reader string, ctx *scard.Context) *scard.Card
 	}
 	if ctx != nil {
 		card, err = ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
-		//todo想要确保释放，但是万一获取sn的连接释放成功后，烧录连接连通，此时的defer把烧录的释放掉了怎么办？
-		//defer closeCardConnection(card)
 		if err != nil {
 			//todo应当对外通知此reader存在异常
 			s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
@@ -830,8 +826,9 @@ func (s *PcscDriver) closeCardConnection(card *scard.Card) {
 		err := card.Disconnect(scard.ResetCard)
 		if err != nil {
 			s.lc.Warnf("release card connetion meet err,%v", err)
-			return
 		}
+	} else {
+		s.lc.Warnf("card is nil during close card connetion")
 	}
 }
 

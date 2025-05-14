@@ -75,9 +75,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
 #RUN apk --no-cache upgrade
 
 WORKDIR /pcsc-device-hsm/cmd/
-#COPY --from=builder /pcsc-device-hsm/cmd/Attribution.txt /Attribution.txt
-#COPY --from=builder /pcsc-device-hsm/cmd/pcsc-device-hsm /pcsc-device-hsm
-#COPY --from=builder /pcsc-device-hsm/cmd/res/ /res
+
 COPY --from=builder /app/cmd/res /pcsc-device-hsm/cmd/res
 COPY --from=builder /app/cmd/pcsc-device-hsm.bin /pcsc-device-hsm/cmd/pcsc-device-hsm.bin
 # 查看最终镜像的文件结构（调试用）
