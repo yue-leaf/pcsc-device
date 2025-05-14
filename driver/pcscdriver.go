@@ -366,6 +366,7 @@ func (s *PcscDriver) Discover() error {
 	case scard.ErrSuccess, nil:
 		{
 		}
+		//没有获取到设备的情况交给发现设备逻辑自动移除旧设备
 	case scard.ErrNoReadersAvailable:
 		{
 
@@ -380,7 +381,7 @@ func (s *PcscDriver) Discover() error {
 			pcscResourceManagerContext, s.client = ctx, ctx
 			readers, err2 = pcscResourceManagerContext.ListReaders()
 			if err != nil {
-				s.lc.Warnf("Fail to list Readers,err:%s,and  recover by geting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
+				s.lc.Warnf("Fail to list Readers,err:%s,and  recover by getting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
 				return err2
 			}
 		}
