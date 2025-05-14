@@ -84,8 +84,10 @@ COPY --from=builder /app/cmd/pcsc-device-hsm.bin /pcsc-device-hsm/cmd/pcsc-devic
 RUN apk add --no-cache tree && \
     echo "最终镜像文件结构:" && \
     tree -L 5 /pcsc-device-hsm
-
-RUN usermod -aG scard 2002
+#ubuntu
+#RUN usermod -aG scard 2002
+#alpine
+RUN addgroup -S scard && adduser -S pcsc-device-hsm -G scard
 
 EXPOSE 59999
 
