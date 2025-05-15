@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"github.com/ebfe/scard"
 	"github.com/edgexfoundry/device-simple/usafecard"
-
 	//"github.com/edgexfoundry/device-sdk-go/v4/internal/cache"
 	"github.com/edgexfoundry/device-sdk-go/v4/pkg/interfaces"
 	sdkModels "github.com/edgexfoundry/device-sdk-go/v4/pkg/models"
@@ -374,12 +373,18 @@ func (s *PcscDriver) Discover() error {
 			ctx, err2 := scard.EstablishContext()
 			if err2 != nil {
 				s.lc.Warnf("Fail to list Readers,err:%s,and hard to recover by getting pcsc ResourceManager,err:%s", err, err2)
+				oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
+				s.lc.Infof("modify all devices to down")
+				s.deleteOldDevice(oldserialNumberReaderMap, []string{})
 				return err
 			}
 			pcscResourceManagerContext, s.client = ctx, ctx
 			readers, err2 = pcscResourceManagerContext.ListReaders()
 			if err != nil {
 				s.lc.Warnf("Fail to list Readers,err:%s,and  recover by getting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
+				oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
+				s.lc.Infof("modify all devices to down")
+				s.deleteOldDevice(oldserialNumberReaderMap, []string{})
 				return err2
 			}
 		}
@@ -720,29 +725,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 	//管理被拔除的设备——状态置为down
 	//todo还需管理channel
 	//timeNow := time.Now().String()
-	for old, _ := range oldserialNumberReaderMap {
-		if !ContainElement[string](lastestSerialNumberList, old) {
-			//放弃发送拔除设备通知，转为采用更新设备状态的方式
-			//proto := make(map[string]models.ProtocolProperties)
-			//proto["pcsc"] = map[string]any{"SerialNumber": old}
-			//res = append(res, sdkModels.DiscoveredDevice{
-			//	Name:        old,
-			//	Protocols:   proto,
-			//	Description: "removed by discovery",
-			//	Labels:      []string{"auto-discovery", "removed", timeNow}})
-			//s.sdk.
-			//s.sdk.cache.Devices
-
-			//if err := s.sdk.RemoveDeviceByName(old); err != nil {
-			if err := s.sdk.UpdateDeviceOperatingState(old, models.Down); err != nil {
-				s.lc.Warnf("update device:%s operating state meet err:%s", old, err)
-			} else {
-				//cache.Dev
-				//cache.Devices().RemoveByName(old)
-				s.removeSerialNumberMap(old)
-			}
-		}
-	}
+	s.deleteOldDevice(oldserialNumberReaderMap, lastestSerialNumberList)
 	//避免过于频繁的设备扫描,等待设备稳定,部分设备发现过程耗时较久
 	//time.Sleep(time.Duration(s.serviceConfig.PcscCustom.Writable.DiscoverSleepDurationSecs) * time.Second)
 	//PublishDeviceDiscoveryProgressSystemEvent用于发布设备发现进度的系统事件，50：表示当前设备发现的进度百分比，len(res)设备数量
@@ -841,16 +824,30 @@ func ContainElement[T comparable](slice []T, element T) bool {
 	return false
 }
 
-//func (s *PcscDriver) deleteOldDevice(old map[string]string, new []string) {
-//
-//	waitToDeleteCard := make([]string, 1)
-//	for oldSN, _ := range old {
-//		if ContainElement(new, oldSN) {
-//			continue
-//		} else {
-//			waitToDeleteCard = append(waitToDeleteCard, oldSN)
-//		}
-//	}
-//	baseUrl := "http://172.16.0.10:4000/core-metadata/api/v3/device/name/testDelete"
-//	http.NewRequest("DELETE", baseUrl, nil)
-//}
+func (s *PcscDriver) deleteOldDevice(oldserialNumberReaderMap map[string]usafecard.USafeCard, lastestSerialNumberList []string) {
+	//管理被拔除的设备——状态置为down
+	//todo还需管理channel
+	//timeNow := time.Now().String()
+	for old, _ := range oldserialNumberReaderMap {
+		if !ContainElement[string](lastestSerialNumberList, old) {
+			//proto := make(map[string]models.ProtocolProperties)
+			//proto["pcsc"] = map[string]any{"SerialNumber": old}
+			//res = append(res, sdkModels.DiscoveredDevice{
+			//	Name:        old,
+			//	Protocols:   proto,
+			//	Description: "removed by discovery",
+			//	Labels:      []string{"auto-discovery", "removed", timeNow}})
+			//s.sdk.
+			//s.sdk.cache.Devices
+
+			//if err := s.sdk.RemoveDeviceByName(old); err != nil {
+			//放弃发送拔除设备通知，转为采用更新设备状态的方式
+			if err := s.sdk.UpdateDeviceOperatingState(old, models.Down); err != nil {
+				s.lc.Warnf("update device:%s operating state meet err:%s", old, err)
+			} else {
+				//cache.Devices().RemoveByName(old)
+				s.removeSerialNumberMap(old)
+			}
+		}
+	}
+}
