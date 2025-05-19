@@ -379,7 +379,7 @@ func (s *PcscDriver) Discover() error {
 	// Establish a context
 	//涉及系统线程锁
 	//获取操作系统的PCSC管理资源管理器的上下文
-	edgeXLog.Warnf("触发定时发现读卡器")
+	edgeXLog.Debug("触发定时发现读卡器")
 	pcscResourceManagerContext := s.client
 
 	// List available readers
@@ -406,7 +406,7 @@ func (s *PcscDriver) Discover() error {
 			pcscResourceManagerContext, s.client = ctx, ctx
 			readers, err2 = pcscResourceManagerContext.ListReaders()
 			if err != nil {
-				edgeXLog.Warnf("", "Fail to list Readers,err:%s,and  recover by getting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
+				edgeXLog.Warnf("Fail to list Readers,err:%s,and  recover by getting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
 				oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
 				edgeXLog.Info("modify all devices to down")
 				s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
@@ -497,8 +497,10 @@ func (s *PcscDriver) ValidateDevice(device models.Device) error {
 func (s *PcscDriver) ProfileScan(payload requests.ProfileScanRequest) (models.DeviceProfile, error) {
 	time.Sleep(time.Duration(s.serviceConfig.PcscCustom.Writable.DiscoverSleepDurationSecs) * time.Second)
 	s.sdk.PublishProfileScanProgressSystemEvent(payload.RequestId, 50, "")
+	edgeXLog := log.NewEdgeXLog(s.lc)
 	if s.getStopProfileScan(payload.DeviceName) {
-		return models.DeviceProfile{}, fmt.Errorf("profile scanning is stopped")
+		edgeXLog.Error("profile scanning is stopped")
+		return models.DeviceProfile{}, errors.New("profile scanning is stopped")
 	}
 	time.Sleep(time.Duration(s.serviceConfig.PcscCustom.Writable.DiscoverSleepDurationSecs) * time.Second)
 	return models.DeviceProfile{Name: payload.ProfileName}, nil
