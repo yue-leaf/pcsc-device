@@ -39,6 +39,7 @@ PcscCustom:
     SourceType: "pcsc-device-hsm"
     LogFile: "pcsc-device-hsm.log"
     LogDir: "./log/"
+    OutputFile: false
     Encrypted: false
     OutputConsole: true
     MinLevel: "info"

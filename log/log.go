@@ -51,6 +51,7 @@ type LogConfig struct {
 	SourceType    string // 日志来源
 	LogFile       string // 日志文件
 	LogDir        string // 日志目录
+	OutputFile    bool   // 是否同时输出到文件
 	Encrypted     bool   // 是否加密
 	PartnerCode   string // 合作伙伴代码
 	BatchId       int    // 批次ID
@@ -97,23 +98,25 @@ func InitLogger(config LogConfig) {
 
 	var writers []io.Writer
 
-	// 如果指定了日志文件和目录
-	if config.LogFile == "" {
-		config.LogFile = "pcsc-device-hsm.log"
-	}
-	if config.LogDir == "" {
-		config.LogDir = "./log/"
-	}
+	if config.OutputFile {
+		// 如果指定了日志文件和目录
+		if config.LogFile == "" {
+			config.LogFile = "pcsc-device-hsm.log"
+		}
+		if config.LogDir == "" {
+			config.LogDir = "./log/"
+		}
 
-	if err := os.MkdirAll(config.LogDir, 0755); err != nil {
-		fmt.Printf("创建日志目录失败: %v\n", err)
-	} else {
-		logPath := filepath.Join(config.LogDir, config.LogFile)
-		file, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			fmt.Printf("打开日志文件失败: %v\n", err)
+		if err := os.MkdirAll(config.LogDir, 0755); err != nil {
+			fmt.Printf("创建日志目录失败: %v\n", err)
 		} else {
-			writers = append(writers, file)
+			logPath := filepath.Join(config.LogDir, config.LogFile)
+			file, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+			if err != nil {
+				fmt.Printf("打开日志文件失败: %v\n", err)
+			} else {
+				writers = append(writers, file)
+			}
 		}
 	}
 
