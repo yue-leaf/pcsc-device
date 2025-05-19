@@ -17,13 +17,15 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ebfe/scard"
+	"github.com/edgexfoundry/device-simple/log"
 	"github.com/edgexfoundry/device-simple/usafecard"
+	"github.com/rs/zerolog"
+
 	//"github.com/edgexfoundry/device-sdk-go/v4/internal/cache"
 	"github.com/edgexfoundry/device-sdk-go/v4/pkg/interfaces"
 	sdkModels "github.com/edgexfoundry/device-sdk-go/v4/pkg/models"
 	"github.com/edgexfoundry/device-simple/client"
 	"github.com/edgexfoundry/device-simple/config"
-	"github.com/edgexfoundry/go-mod-core-contracts/v4/clients/logger"
 	"github.com/edgexfoundry/go-mod-core-contracts/v4/common"
 	"github.com/edgexfoundry/go-mod-core-contracts/v4/dtos/requests"
 	"github.com/edgexfoundry/go-mod-core-contracts/v4/models"
@@ -37,8 +39,9 @@ import (
 const operationCounterName = "OperationCounter"
 
 type PcscDriver struct {
-	sdk             interfaces.DeviceServiceSDK
-	lc              logger.LoggingClient
+	sdk interfaces.DeviceServiceSDK
+	//lc              logger.LoggingClient
+	lc              *zerolog.Logger
 	stopDiscovery   stopDiscoveryState
 	stopProfileScan stopProfileScanState
 	asyncCh         chan<- *sdkModels.AsyncValues       //框架自带，异步事件通知，可借此主动发送异步通知，可通过订阅mqtt的topic消费，topicName见框架的utils.SendEvent方法中
@@ -72,7 +75,7 @@ type stopProfileScanState struct {
 // service.
 func (s *PcscDriver) Initialize(sdk interfaces.DeviceServiceSDK) error {
 	s.sdk = sdk
-	s.lc = sdk.LoggingClient()
+
 	s.asyncCh = sdk.AsyncValuesChannel()
 	s.deviceCh = sdk.DiscoveredDeviceChannel()
 	s.readerCh = make(map[string]chan struct{}, 8)
@@ -84,19 +87,29 @@ func (s *PcscDriver) Initialize(sdk interfaces.DeviceServiceSDK) error {
 	if err := sdk.LoadCustomConfig(s.serviceConfig, "PcscCustom"); err != nil {
 		return fmt.Errorf("unable to load 'PcscCustom' custom configuration: %s", err.Error())
 	}
+	customConfig := s.serviceConfig.PcscCustom
+	fmt.Println("Custom config is: ", customConfig)
+	//s.lc.Infof("Custom config is: %v", customConfig)
 
-	s.lc.Infof("Custom config is: %v", s.serviceConfig.PcscCustom)
-
-	if err := s.serviceConfig.PcscCustom.Validate(); err != nil {
+	if err := customConfig.Validate(); err != nil {
 		return fmt.Errorf("'SimpleCustom' custom configuration validation failed: %s", err.Error())
 	}
 
 	if err := sdk.ListenForCustomConfigChanges(
-		&s.serviceConfig.PcscCustom.Writable,
+		&customConfig.Writable,
 		"PcscCustom/Writable", s.ProcessCustomConfigChanges); err != nil {
 		return fmt.Errorf("unable to listen for changes for 'SimpleCustom.Writable' custom configuration: %s", err.Error())
 	}
-
+	log.InitLogger(log.LogConfig{
+		SourceType:    customConfig.LogConfig.SourceType,
+		LogFile:       customConfig.LogConfig.LogFile,
+		LogDir:        customConfig.LogConfig.LogDir,
+		Encrypted:     customConfig.LogConfig.Encrypted,
+		OutputConsole: customConfig.LogConfig.OutputConsole,
+		MinLevel:      customConfig.LogConfig.MinLevel,
+	})
+	s.lc = log.GetLogger()
+	//s.lc = sdk.LoggingClient()
 	s.operationCounter = gometrics.NewCounter()
 
 	var err error
@@ -111,26 +124,27 @@ func (s *PcscDriver) Initialize(sdk interfaces.DeviceServiceSDK) error {
 		return fmt.Errorf("unable to register metric %s: %s", operationCounterName, err.Error())
 	}
 
-	s.lc.Infof("Registered %s metric for collection when enabled", operationCounterName)
+	s.lc.Info().Msgf("Registered %s metric for collection when enabled", operationCounterName)
 
 	return nil
 }
 
 // ProcessCustomConfigChanges ...
 func (s *PcscDriver) ProcessCustomConfigChanges(rawWritableConfig interface{}) {
+	edgeXLog := log.NewEdgeXLog(s.lc)
 	updated, ok := rawWritableConfig.(*config.PcscWritable)
 	if !ok {
-		s.lc.Error("unable to process custom config updates: Can not cast raw config to type 'PcscWritable'")
+		edgeXLog.Error("unable to process custom config updates: Can not cast raw config to type 'PcscWritable'")
 		return
 	}
 
-	s.lc.Info("Received configuration updates for 'PcscCustom.Writable' section")
+	edgeXLog.Info("Received configuration updates for 'PcscCustom.Writable' section")
 
 	previous := s.serviceConfig.PcscCustom.Writable
 	s.serviceConfig.PcscCustom.Writable = *updated
 
 	if reflect.DeepEqual(previous, *updated) {
-		s.lc.Info("No changes detected")
+		edgeXLog.Info("No changes detected")
 		return
 	}
 
@@ -141,20 +155,20 @@ func (s *PcscDriver) ProcessCustomConfigChanges(rawWritableConfig interface{}) {
 	// This may not be true for all settings, such as external host connection info, which
 	// may require re-establishing the connection to the external host for example.
 	if previous.DiscoverSleepDurationSecs != updated.DiscoverSleepDurationSecs {
-		s.lc.Infof("DiscoverSleepDurationSecs changed to: %d", updated.DiscoverSleepDurationSecs)
+		edgeXLog.Infof("DiscoverSleepDurationSecs changed to: %d", updated.DiscoverSleepDurationSecs)
 	}
 }
 
 // HandleReadCommands triggers a protocol Read operation for the specified device.
 func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]models.ProtocolProperties, reqs []sdkModels.CommandRequest) (res []*sdkModels.CommandValue, err error) {
-
 	//res = make([]*sdkModels.CommandValue, 1)
 	for i, req := range reqs {
-		s.lc.Debugf("PcscDriver.HandleReadCommands: protocols: %v resource: %v attributes: %v", protocols, reqs[i].DeviceResourceName, reqs[i].Attributes)
+		edgeXLog := log.NewEdgeXLog(s.lc)
+		edgeXLog.Debugf("PcscDriver.HandleReadCommands: protocols: %v resource: %v attributes: %v", protocols, reqs[i].DeviceResourceName, reqs[i].Attributes)
 		//check Resource is existing
 		_, ok := s.sdk.DeviceResource(deviceName, req.DeviceResourceName)
 		if !ok {
-			s.lc.Warn("Resource not found")
+			edgeXLog.Warn("Resource not found")
 			return nil, errors.New("Resource not found")
 		}
 
@@ -165,10 +179,10 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 				currCard, b := s.getSerialNumberMap(deviceName)
 				if b {
 					//通过轻量锁控制实现
-					card := s.getReadyCard(currCard.Reader, s.client)
+					card := s.getReadyCard(&edgeXLog, currCard.Reader, s.client)
 					if card == nil {
-						s.lc.Warnf("get ready card fail,reader:%v", currCard.Reader)
-						s.putReadyCard(currCard.Reader, card)
+						edgeXLog.Warnf("get ready card fail,reader:%v", currCard.Reader)
+						s.putReadyCard(&edgeXLog, currCard.Reader, card)
 						return nil, errors.New("get no ready card")
 					}
 
@@ -180,25 +194,25 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 						}
 					}
 					if cmd == nil {
-						s.lc.Warn("apdus is nil, stop execution")
+						edgeXLog.Warn("apdus is nil, stop execution")
 						return nil, errors.New("empty apdus")
 					}
-					s.lc.Debugf("Transmit c-apdu: % x", cmd)
+					edgeXLog.Debugf("Transmit c-apdu: % x", cmd)
 					result, err := card.Transmit(cmd)
 					if err != nil {
-						s.lc.Warn("Device ", deviceName, " Transmit Apdu err:", err)
+						edgeXLog.Warnf("Device %s Transmit Apdu err:%v", deviceName, err)
 					}
-					s.lc.Debugf("r-apdu: % x", result)
+					edgeXLog.Debugf("r-apdu: % x", result)
 					cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
 				} else {
 					all := s.getAllSerialNumberReaderMap()
-					s.lc.Warnf("no device:%s in devices readers Map%s", deviceName, all)
+					edgeXLog.Warnf("no device:%s in devices readers Map%s", deviceName, all)
 					return nil, errors.New("no reader in devices readers Map")
 				}
 			}
 		default:
 			{
-				s.lc.Warnf("no such DeviceResourceName%s", req.DeviceResourceName)
+				edgeXLog.Warnf("no such DeviceResourceName%s", req.DeviceResourceName)
 				return nil, errors.New("no such DeviceResourceName")
 			}
 
@@ -223,13 +237,17 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 	var reqBody apduReqBody
 	var cmds [][]byte
 	var cmdsResults [][]byte
-
 	for i, req := range reqs {
-		s.lc.Debugf("PcscDriver.HandleWriteCommands: protocols: %v, resource: %v, parameters: %v, attributes: %v", protocols, reqs[i].DeviceResourceName, params[i], reqs[i].Attributes)
+		edgeXLog := log.NewEdgeXLog(s.lc)
+
+		//lc := log.GetLoggerWithTrace(reqBody.RequestId)
+		//lc := s.lc.Hook(edgeXLog).With().Logger()
+
+		edgeXLog.Debugf("PcscDriver.HandleWriteCommands: protocols: %v, resource: %v, parameters: %v, attributes: %v", protocols, reqs[i].DeviceResourceName, params[i], reqs[i].Attributes)
 		//check Resource is existing
 		_, ok := s.sdk.DeviceResource(deviceName, req.DeviceResourceName)
 		if !ok {
-			s.lc.Warn("Pcsc Resource Manager not found")
+			edgeXLog.Warn("Pcsc Resource Manager not found")
 			return errors.New("Pcsc Resource Manager not found")
 		}
 		switch req.DeviceResourceName {
@@ -240,28 +258,29 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 				}
 
 				if apdu, err = params[i].ObjectValue(); err != nil {
-					s.lc.Warnf("PcscDriver.HandleWriteCommands; the data type of parameter should be Object, parameter: %s", params[i].String())
+					edgeXLog.Warnf("PcscDriver.HandleWriteCommands; the data type of parameter should be Object, parameter: %s", params[i].String())
 					return err
 				}
-				reqBody, err = s.parseApdus(apdu)
-				s.lc.Infof("receive RequestId:%s", reqBody.RequestId)
+				reqBody, err = s.parseApdus(&edgeXLog, apdu)
+				edgeXLog.TraceId = reqBody.RequestId
+				edgeXLog.Infof("receive RequestId:%s", reqBody.RequestId)
 				if err != nil {
-					s.lc.Warnf("parse apdus error: ", err)
+					edgeXLog.Warnf("parse apdus error: %s", err)
 					return err
 				}
 				cmds = reqBody.Apdu
 				if cmds == nil {
-					s.lc.Warn("apdus is nil, stop execution")
+					edgeXLog.Warn("apdus is nil, stop execution")
 					return errors.New("empty apdus")
 				}
-				s.lc.Infof("Transmit c-apdu:%v ", cmds)
+				edgeXLog.Infof("Transmit c-apdu:%v ", cmds)
 				currCard, b := s.getSerialNumberMap(deviceName)
 				if b {
 					//通过轻量锁控制实现
-					card := s.getReadyCard(currCard.Reader, s.client)
+					card := s.getReadyCard(&edgeXLog, currCard.Reader, s.client)
 					if card == nil {
-						s.lc.Warnf("RequestId:%s,get ready card fail", reqBody.RequestId)
-						s.putReadyCard(currCard.Reader, card)
+						edgeXLog.Warnf("RequestId:%s,get ready card fail", reqBody.RequestId)
+						s.putReadyCard(&edgeXLog, currCard.Reader, card)
 						return errors.New("get no ready card")
 					}
 					cmdsResults = make([][]byte, len(cmds))
@@ -270,24 +289,24 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 						//cmdsResults[index] = make([]byte, len(result))
 						cmdsResults[index] = result
 						if err != nil {
-							s.lc.Warnf("Device %s Transmit Apdu err:%v", deviceName, err)
+							edgeXLog.Warnf("Device %s Transmit Apdu err:%v", deviceName, err)
 							break
 						}
 					}
 					//通过轻量锁控制实现
 					//todo部分情况下释放似乎很耗时
-					s.putReadyCard(currCard.Reader, card)
+					s.putReadyCard(&edgeXLog, currCard.Reader, card)
 					//原实现
 					//closeCardConnection(card)
-					s.lc.Infof("r-apdu:", cmdsResults)
+					edgeXLog.Infof("r-apdu:%v", cmdsResults)
 				} else {
 					all := s.getAllSerialNumberReaderMap()
-					s.lc.Warnf("no device:%s in devices readers Map%s", deviceName, all)
+					edgeXLog.Warnf("no device:%s in devices readers Map%s", deviceName, all)
 					return errors.New("no reader in devices readers Map")
 				}
 				result := map[string]interface{}{
 					"ApduResult": cmdsResults,
-					"RequestId":  reqBody.RequestId,
+					"RequestId":  edgeXLog.TraceId,
 				}
 				cv, _ := sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeObject, result)
 				asyncValues = &sdkModels.AsyncValues{
@@ -298,7 +317,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 			}
 		default:
 			{
-				s.lc.Warnf("no such DeviceResourceName%s", req.DeviceResourceName)
+				edgeXLog.Warnf("no such DeviceResourceName%s", req.DeviceResourceName)
 				return errors.New("no such DeviceResourceName")
 			}
 		}
@@ -312,11 +331,12 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 // for closing any in-use channels, including the channel used to send async
 // readings (if supported).
 func (s *PcscDriver) Stop(force bool) error {
+	edgeXLog := log.NewEdgeXLog(s.lc)
 	// Then Logging Client might not be initialized
 	if s.lc != nil {
-		s.lc.Debugf("PcscDriver.Stop called: force=%v", force)
+		edgeXLog.Warnf("PcscDriver.Stop called: force=%v", force)
 	}
-
+	log.Close()
 	return s.client.Release()
 }
 
@@ -328,7 +348,8 @@ func (s *PcscDriver) Start() error {
 // when a new Device associated with this Device Service is added
 // MetadataSystemEventsCallback中监听messagebus中的DeviceSystemEventType
 func (s *PcscDriver) AddDevice(deviceName string, protocols map[string]models.ProtocolProperties, adminState models.AdminState) error {
-	s.lc.Debugf("a new Device is added: %s", deviceName)
+	edgeXLog := log.NewEdgeXLog(s.lc)
+	edgeXLog.Infof("a new Device is added: %s", deviceName)
 	return nil
 }
 
@@ -336,7 +357,8 @@ func (s *PcscDriver) AddDevice(deviceName string, protocols map[string]models.Pr
 // when a Device associated with this Device Service is updated
 // MetadataSystemEventsCallback中监听messagebus中的DeviceSystemEventType
 func (s *PcscDriver) UpdateDevice(deviceName string, protocols map[string]models.ProtocolProperties, adminState models.AdminState) error {
-	s.lc.Debugf("Device %s is updated", deviceName)
+	edgeXLog := log.NewEdgeXLog(s.lc)
+	edgeXLog.Infof("Device %s is updated", deviceName)
 	return nil
 }
 
@@ -344,17 +366,20 @@ func (s *PcscDriver) UpdateDevice(deviceName string, protocols map[string]models
 // when a Device associated with this Device Service is removed
 // MetadataSystemEventsCallback中监听messagebus中的DeviceSystemEventType
 func (s *PcscDriver) RemoveDevice(deviceName string, protocols map[string]models.ProtocolProperties) error {
-	s.lc.Debugf("Device %s is removed", deviceName)
+	edgeXLog := log.NewEdgeXLog(s.lc)
+	edgeXLog.Infof("Device %s is removed", deviceName)
 	return nil
 }
 
 // Discover triggers protocol specific device discovery, which is an asynchronous operation.
 // Devices found as part of this discovery operation are written to the channel devices.
 func (s *PcscDriver) Discover() error {
+	edgeXLog := log.NewEdgeXLog(s.lc)
+
 	// Establish a context
 	//涉及系统线程锁
 	//获取操作系统的PCSC管理资源管理器的上下文
-	s.lc.Debug("触发定时发现读卡器")
+	edgeXLog.Warnf("触发定时发现读卡器")
 	pcscResourceManagerContext := s.client
 
 	// List available readers
@@ -372,24 +397,24 @@ func (s *PcscDriver) Discover() error {
 		{
 			ctx, err2 := scard.EstablishContext()
 			if err2 != nil {
-				s.lc.Warnf("Fail to list Readers,err:%s,and hard to recover by getting pcsc ResourceManager,err:%s", err, err2)
+				edgeXLog.Warnf("Fail to list Readers,err:%s,and hard to recover by getting pcsc ResourceManager,err:%s", err, err2)
 				oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
-				s.lc.Infof("modify all devices to down")
-				s.deleteOldDevice(oldserialNumberReaderMap, []string{})
+				edgeXLog.Info("modify all devices to down")
+				s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
 				return err
 			}
 			pcscResourceManagerContext, s.client = ctx, ctx
 			readers, err2 = pcscResourceManagerContext.ListReaders()
 			if err != nil {
-				s.lc.Warnf("Fail to list Readers,err:%s,and  recover by getting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
+				edgeXLog.Warnf("", "Fail to list Readers,err:%s,and  recover by getting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
 				oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
-				s.lc.Infof("modify all devices to down")
-				s.deleteOldDevice(oldserialNumberReaderMap, []string{})
+				edgeXLog.Info("modify all devices to down")
+				s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
 				return err2
 			}
 		}
 	}
-	s.lc.Infof("find readers:%v", readers)
+	edgeXLog.Infof("find readers:%v", readers)
 	//通过readerCh作为轻量锁，来传递reader是否可用
 	for _, reader := range readers {
 		if _, ok := s.readerCh[reader]; !ok {
@@ -398,7 +423,7 @@ func (s *PcscDriver) Discover() error {
 		}
 	}
 	//todo还需做到设备拔除后通知metadata，防止下游获取到不可用设备
-	s.discoverSerialNumber(readers, pcscResourceManagerContext)
+	s.discoverSerialNumber(&edgeXLog, readers, pcscResourceManagerContext)
 	/*	fmt.Printf("Found %d readers:\n", len(readers))
 		for i, reader := range readers {
 			fmt.Printf("[%d] %s\n", i, reader)
@@ -480,26 +505,30 @@ func (s *PcscDriver) ProfileScan(payload requests.ProfileScanRequest) (models.De
 }
 
 func (s *PcscDriver) StopDeviceDiscovery(options map[string]any) {
-	s.lc.Debugf("StopDeviceDiscovery called: options=%v", options)
+	edgeXLog := log.NewEdgeXLog(s.lc)
+	edgeXLog.Infof("StopDeviceDiscovery called: options=%v", options)
 	s.setStopDeviceDiscovery(true)
 }
 
 func (s *PcscDriver) StopProfileScan(device string, options map[string]any) {
-	s.lc.Debugf("StopProfileScan called: options=%v", options)
+	edgeXLog := log.NewEdgeXLog(s.lc)
+	edgeXLog.Infof("StopProfileScan called: options=%v", options)
 	s.setStopProfileScan(device, true)
 }
 
 func (s *PcscDriver) getStopDeviceDiscovery() bool {
+
 	s.stopDiscovery.locker.RLock()
 	defer s.stopDiscovery.locker.RUnlock()
 	return s.stopDiscovery.stop
 }
 
 func (s *PcscDriver) setStopDeviceDiscovery(stop bool) {
+	edgeXLog := log.NewEdgeXLog(s.lc)
 	s.stopDiscovery.locker.Lock()
 	defer s.stopDiscovery.locker.Unlock()
 	s.stopDiscovery.stop = stop
-	s.lc.Debugf("set stopDeviceDiscovery to %v", stop)
+	edgeXLog.Infof("set stopDeviceDiscovery to %v", stop)
 }
 
 func (s *PcscDriver) getStopProfileScan(device string) bool {
@@ -509,10 +538,11 @@ func (s *PcscDriver) getStopProfileScan(device string) bool {
 }
 
 func (s *PcscDriver) setStopProfileScan(device string, stop bool) {
+	edgeXLog := log.NewEdgeXLog(s.lc)
 	s.stopProfileScan.locker.Lock()
 	defer s.stopProfileScan.locker.Unlock()
 	s.stopProfileScan.stop[device] = stop
-	s.lc.Debugf("set stopProfileScan to %v", stop)
+	edgeXLog.Infof("set stopProfileScan to %v", stop)
 }
 
 type apduReqBody struct {
@@ -520,7 +550,7 @@ type apduReqBody struct {
 	RequestId string   `json:"RequestId"`
 }
 
-func (s *PcscDriver) parseApdus(rawApdus interface{}) (apduReqBody, error) {
+func (s *PcscDriver) parseApdus(edgeXLog *log.EdgeXLogHook, rawApdus interface{}) (apduReqBody, error) {
 	var temp apduReqBody
 	//var cmd [][]byte
 	switch t := rawApdus.(type) {
@@ -589,7 +619,7 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) (apduReqBody, error) {
 			body, _ := base64.StdEncoding.DecodeString(raw)
 
 			if err := json.Unmarshal(body, &temp); err != nil {
-				s.lc.Warnf("Unmarshal body meet error,body:%v,err:%s", body, err)
+				edgeXLog.Warnf("Unmarshal body meet error,body:%v,err:%s", body, err)
 				return temp, err
 			}
 			//cmd = make([][]byte, len(temp.Apdu))
@@ -603,8 +633,8 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) (apduReqBody, error) {
 		{
 			typeOf := reflect.TypeOf(rawApdus)
 
-			s.lc.Warnf("rawApdus typeOf:%v,typeOf.Elem():%v", typeOf, typeOf.Elem())
-			s.lc.Warnf("parse apdu meet error,apdu:%v,apdu-type:%v,err:%s", t, "type of apdus is not supported")
+			edgeXLog.Warnf("rawApdus typeOf:%v,typeOf.Elem():%v", typeOf, typeOf.Elem())
+			edgeXLog.Warnf("parse apdu meet error,apdu:%v,apdu-type:%v,err:%s", t, "type of apdus is not supported")
 			return temp, errors.New("type of apdus is not supported")
 		}
 	}
@@ -612,13 +642,13 @@ func (s *PcscDriver) parseApdus(rawApdus interface{}) (apduReqBody, error) {
 
 }
 
-func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) {
+func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []string, ctx *scard.Context) {
 	lastestSerialNumberList := make([]string, len(readers))
 	serialNumberMap := make(map[string]usafecard.USafeCard, len(readers))
 	oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
 	for i, reader := range readers {
 		//通过轻量锁控制实现
-		card := s.getReadyCard(reader, ctx)
+		card := s.getReadyCard(edgeXLog, reader, ctx)
 
 		//获取卡状态scard.CardStatus
 		//reader表示当前连接的智能卡读卡器的名称
@@ -634,17 +664,17 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 		//atr 智能卡 ATR（Answer To Reset）信息
 		//这是智能卡的复位应答信息。当智能卡上电或复位时，会发送一个 ATR 字节序列，其中包含了智能卡的一些基本信息，如制造商、卡类型、支持的协议等。通过分析 ATR 信息，可以了解智能卡的特性和能力。
 		if card == nil {
-			s.lc.Warnf("get ready card fail,reader:%s", reader)
-			s.putReadyCard(reader, card)
+			edgeXLog.Warnf("get ready card fail,reader:%s", reader)
+			s.putReadyCard(edgeXLog, reader, card)
 			//return nil, errors.New("get no ready card")
 			return
 		}
 		_, err := card.Status()
 		if err != nil {
 			//todo应当对外通知此reader存在异常
-			s.lc.Warnf("reader:%s status err:%s", reader, err)
+			edgeXLog.Warnf("reader:%s status err:%s", reader, err)
 			//通过轻量锁控制实现
-			s.putReadyCard(reader, card)
+			s.putReadyCard(edgeXLog, reader, card)
 			//原实现
 			//closeCardConnection(card)
 			continue
@@ -658,14 +688,14 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 			{0x80, 0x02, 0x00, 0x00, 0x06, 0x41, 0x04, 0x00, 0x00, 0x00, 0x02},
 		}
 		for j, cmd := range cmds {
-			s.lc.Infof("Transmit c-apdu: % x\n", cmd)
+			edgeXLog.Infof("Transmit c-apdu: % x\n", cmd)
 			rsp, err := card.Transmit(cmd)
 			if err != nil {
 				//todo应当对外通知此reader存在异常
-				s.lc.Warnf("reader:%s Transmit apdu err:%s", reader, err)
+				edgeXLog.Warnf("reader:%s Transmit apdu err:%s", reader, err)
 				break
 			}
-			s.lc.Infof("Transmit r-apdu: % x\n", rsp)
+			edgeXLog.Infof("Transmit r-apdu: % x\n", rsp)
 			if j == 1 {
 				lenRsp := len(rsp)
 				//if rsp[lenRsp-1]==0x90&&rsp[lenRsp-2]==0x00 {
@@ -690,10 +720,10 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 			}
 		}
 		//通过轻量锁控制实现
-		s.putReadyCard(reader, card)
+		s.putReadyCard(edgeXLog, reader, card)
 	}
 
-	s.lc.Infof("the lastest devices list,%v", oldserialNumberReaderMap)
+	edgeXLog.Infof("the lastest devices list,%v", oldserialNumberReaderMap)
 	//todo此时设备要是又拔了会有问题，但是多少有点离谱
 	//管理可用设备
 	res := make([]sdkModels.DiscoveredDevice, 0, 1)
@@ -713,7 +743,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 				//cache中有，SerialNumberMap没有表示之前被移除过
 				//之前被拔除的设备状态恢复到Up
 				if err := s.sdk.UpdateDeviceOperatingState(serialNumber, models.Up); err != nil {
-					s.lc.Warnf("update device:%s operating state to Up meet err:%s", serialNumber, err)
+					edgeXLog.Warnf("update device:%s operating state to Up meet err:%s", serialNumber, err)
 				} else {
 					//cache.Dev
 					//cache.Devices().RemoveByName(old)
@@ -725,7 +755,7 @@ func (s *PcscDriver) discoverSerialNumber(readers []string, ctx *scard.Context) 
 	//管理被拔除的设备——状态置为down
 	//todo还需管理channel
 	//timeNow := time.Now().String()
-	s.deleteOldDevice(oldserialNumberReaderMap, lastestSerialNumberList)
+	s.deleteOldDevice(edgeXLog, oldserialNumberReaderMap, lastestSerialNumberList)
 	//避免过于频繁的设备扫描,等待设备稳定,部分设备发现过程耗时较久
 	//time.Sleep(time.Duration(s.serviceConfig.PcscCustom.Writable.DiscoverSleepDurationSecs) * time.Second)
 	//PublishDeviceDiscoveryProgressSystemEvent用于发布设备发现进度的系统事件，50：表示当前设备发现的进度百分比，len(res)设备数量
@@ -765,27 +795,27 @@ func (s *PcscDriver) getAllSerialNumberReaderMap() map[string]usafecard.USafeCar
 	return all
 }
 
-func (s *PcscDriver) getReadyCard(reader string, ctx *scard.Context) *scard.Card {
+func (s *PcscDriver) getReadyCard(edgeXLog *log.EdgeXLogHook, reader string, ctx *scard.Context) *scard.Card {
 	channel := s.readerCh[reader]
 	var card *scard.Card
 	var err error
-	s.lc.Debugf("等待ReadyCard,reader:%s", reader)
+	edgeXLog.Debugf("等待ReadyCard,reader:%s", reader)
 	//todo需要考虑是否可能存在一直挂起的情况
 	<-channel
-	s.lc.Debugf("成功获取ReadyCard,reader:%s", reader)
+	edgeXLog.Debugf("成功获取ReadyCard,reader:%s", reader)
 	if ctx == nil {
 		ctx, err = scard.EstablishContext()
 		if err != nil {
-			s.lc.Warnf("Pcsc Resource Manager is nil.And hard to recover by getting pcsc ResourceManager,err:%s", err)
+			edgeXLog.Warnf("Pcsc Resource Manager is nil.And hard to recover by getting pcsc ResourceManager,err:%s", err)
 			return nil
 		}
-		s.lc.Warnf("Pcsc Resource Manager lost.Recover during getting ready card.Need to reseach.")
+		edgeXLog.Warnf("Pcsc Resource Manager lost.Recover during getting ready card.Need to reseach.")
 	}
 	if ctx != nil {
 		card, err = ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
 		if err != nil {
 			//todo应当对外通知此reader存在异常
-			s.lc.Warnf("connect with reader:%s,err:%s", reader, err)
+			edgeXLog.Warnf("connect with reader:%s,err:%s", reader, err)
 			//原实现
 			//closeCardConnection(card)
 		}
@@ -795,23 +825,23 @@ func (s *PcscDriver) getReadyCard(reader string, ctx *scard.Context) *scard.Card
 
 }
 
-func (s *PcscDriver) putReadyCard(reader string, card *scard.Card) {
+func (s *PcscDriver) putReadyCard(edgeXLog *log.EdgeXLogHook, reader string, card *scard.Card) {
 	channel := s.readerCh[reader]
 	//todo需考虑当前通过readerCh管理reader的方式是否还可能出现card为nil的情况，如果为nil应该如何处理？是否应该通过readerCh释放reader？
-	s.closeCardConnection(card)
-	s.lc.Debugf("card连接关闭,准备释放ReadyCard,reader:%s", reader)
+	s.closeCardConnection(edgeXLog, card)
+	edgeXLog.Debugf("card连接关闭,准备释放ReadyCard,reader:%s", reader)
 	channel <- struct{}{}
-	s.lc.Debugf("释放ReadyCard成功,reader:%s", reader)
+	edgeXLog.Debugf("释放ReadyCard成功,reader:%s", reader)
 }
 
-func (s *PcscDriver) closeCardConnection(card *scard.Card) {
+func (s *PcscDriver) closeCardConnection(edgeXLog *log.EdgeXLogHook, card *scard.Card) {
 	if card != nil {
 		err := card.Disconnect(scard.ResetCard)
 		if err != nil {
-			s.lc.Warnf("release card connetion meet err,%v", err)
+			edgeXLog.Warnf("release card connetion meet err,%v", err)
 		}
 	} else {
-		s.lc.Warnf("card is nil during close card connetion")
+		edgeXLog.Warnf("card is nil during close card connetion")
 	}
 }
 
@@ -824,7 +854,7 @@ func ContainElement[T comparable](slice []T, element T) bool {
 	return false
 }
 
-func (s *PcscDriver) deleteOldDevice(oldserialNumberReaderMap map[string]usafecard.USafeCard, lastestSerialNumberList []string) {
+func (s *PcscDriver) deleteOldDevice(edgeXLog *log.EdgeXLogHook, oldserialNumberReaderMap map[string]usafecard.USafeCard, lastestSerialNumberList []string) {
 	//管理被拔除的设备——状态置为down
 	//todo还需管理channel
 	//timeNow := time.Now().String()
@@ -843,7 +873,7 @@ func (s *PcscDriver) deleteOldDevice(oldserialNumberReaderMap map[string]usafeca
 			//if err := s.sdk.RemoveDeviceByName(old); err != nil {
 			//放弃发送拔除设备通知，转为采用更新设备状态的方式
 			if err := s.sdk.UpdateDeviceOperatingState(old, models.Down); err != nil {
-				s.lc.Warnf("update device:%s operating state meet err:%s", old, err)
+				edgeXLog.Warnf("update device:%s operating state meet err:%s", old, err)
 			} else {
 				//cache.Devices().RemoveByName(old)
 				s.removeSerialNumberMap(old)

@@ -18,6 +18,7 @@ package config
 
 import (
 	"errors"
+	"github.com/edgexfoundry/device-simple/log"
 )
 
 // This file contains example of custom configuration that can be loaded from the service's configuration.yaml
@@ -34,7 +35,8 @@ type ServiceConfig struct {
 // SimpleCustomConfig is example of service's custom structured configuration that is specified in the service's
 // configuration.yaml file and Configuration Provider (aka Consul), if enabled.
 type PcscCustomConfig struct {
-	Writable PcscWritable
+	Writable  PcscWritable
+	LogConfig log.LogConfig
 }
 
 // SimpleWritable defines the service's custom configuration writable section, i.e. can be updated from Consul
