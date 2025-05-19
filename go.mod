@@ -3,9 +3,11 @@ module github.com/edgexfoundry/device-simple
 go 1.23.4
 
 require (
+	github.com/ebfe/scard v0.0.0-20241214075232-7af069cabc25
 	github.com/edgexfoundry/device-sdk-go/v4 v4.0.0
 	github.com/edgexfoundry/go-mod-core-contracts/v4 v4.0.1
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475
+	github.com/rs/zerolog v1.34.0
 )
 
 require (
@@ -13,7 +15,6 @@ require (
 	github.com/OneOfOne/xxhash v1.2.8 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/ebfe/scard v0.0.0-20241214075232-7af069cabc25 // indirect
 	github.com/eclipse/paho.mqtt.golang v1.5.0 // indirect
 	github.com/edgexfoundry/go-mod-bootstrap/v4 v4.0.3 // indirect
 	github.com/edgexfoundry/go-mod-configuration/v4 v4.0.1 // indirect
@@ -112,7 +113,7 @@ require (
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/oauth2 v0.25.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
