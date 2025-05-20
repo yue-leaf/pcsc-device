@@ -168,21 +168,21 @@ func (h EdgeXLogHook) SetLogger(lc *zerolog.Logger) EdgeXLogHook {
 }
 
 func (h EdgeXLogHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
-	//if h.seq!="" {
-	//	e.Str("seq",h.seq)
-	//}
+	if h.seq != "" {
+		e.Str("seq", h.seq)
+	}
 	if h.TraceId != "" {
 		e.Str("traceId", h.TraceId)
 	}
 	//if h.SourceType!="" {
 	//	e.Str("sourceType",h.SourceType)
 	//}
-	if h.LogFile != "" {
-		e.Str("logFile", h.LogFile)
-	}
-	if h.LogDir != "" {
-		e.Str("logDir", h.LogDir)
-	}
+	//if h.LogFile != "" {
+	//	e.Str("logFile", h.LogFile)
+	//}
+	//if h.LogDir != "" {
+	//	e.Str("logDir", h.LogDir)
+	//}
 
 	e.Bool("encrypted", h.Encrypted)
 	//if h.LogLevel!="" {
@@ -272,34 +272,34 @@ func (h EdgeXLogHook) Error(msg string) {
 
 // Debugf 使用格式化字符串输出调试日志
 func (h EdgeXLogHook) Debugf(format string, args ...interface{}) {
-	lc := h.lc.With().Logger()
+	lc := h.lc.Hook(h).With().Logger()
 	lc.Debug().
 		//Str("caller", addCaller(2)).
-		Msgf(format, args)
+		Msgf(format, args...)
 }
 
 // Infof 使用格式化字符串输出信息日志
 func (h EdgeXLogHook) Infof(format string, args ...interface{}) {
-	lc := h.lc.With().Logger()
+	lc := h.lc.Hook(h).With().Logger()
 	lc.Info().
 		//Str("caller", addCaller(2)).
-		Msgf(format, args)
+		Msgf(format, args...)
 }
 
 // Warnf 使用格式化字符串输出警告日志
 func (h EdgeXLogHook) Warnf(format string, args ...interface{}) {
-	lc := h.lc.With().Logger()
+	lc := h.lc.Hook(h).With().Logger()
 	lc.Warn().
 		//Str("caller", addCaller(2)).
-		Msgf(format, args)
+		Msgf(format, args...)
 }
 
 // Errorf 使用格式化字符串输出错误日志
 func (h EdgeXLogHook) Errorf(format string, args ...interface{}) {
-	lc := h.lc.With().Logger()
+	lc := h.lc.Hook(h).With().Logger()
 	lc.Error().
 		//Str("caller", addCaller(2)).
-		Msgf(format, args)
+		Msgf(format, args...)
 }
 
 // Fatalf 使用格式化字符串输出致命错误日志

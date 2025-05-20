@@ -169,7 +169,7 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 		_, ok := s.sdk.DeviceResource(deviceName, req.DeviceResourceName)
 		if !ok {
 			edgeXLog.Warn("Resource not found")
-			return nil, errors.New("Resource not found")
+			return nil, errors.New("resource not found")
 		}
 
 		var cv *sdkModels.CommandValue
@@ -248,7 +248,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 		_, ok := s.sdk.DeviceResource(deviceName, req.DeviceResourceName)
 		if !ok {
 			edgeXLog.Warn("Pcsc Resource Manager not found")
-			return errors.New("Pcsc Resource Manager not found")
+			return errors.New("pcsc Resource Manager not found")
 		}
 		switch req.DeviceResourceName {
 		case "Apdu":
@@ -375,7 +375,7 @@ func (s *PcscDriver) RemoveDevice(deviceName string, protocols map[string]models
 // Devices found as part of this discovery operation are written to the channel devices.
 func (s *PcscDriver) Discover() error {
 	edgeXLog := log.NewEdgeXLog(s.lc)
-
+	//edgeXLog.TraceId = "TraceIdadadasd"
 	// Establish a context
 	//涉及系统线程锁
 	//获取操作系统的PCSC管理资源管理器的上下文
@@ -636,7 +636,7 @@ func (s *PcscDriver) parseApdus(edgeXLog *log.EdgeXLogHook, rawApdus interface{}
 			typeOf := reflect.TypeOf(rawApdus)
 
 			edgeXLog.Warnf("rawApdus typeOf:%v,typeOf.Elem():%v", typeOf, typeOf.Elem())
-			edgeXLog.Warnf("parse apdu meet error,apdu:%v,apdu-type:%v,err:%s", t, "type of apdus is not supported")
+			edgeXLog.Warnf("parse apdu meet error,apdu:%v,apdu-type:%v,err:%s", t, typeOf, "type of apdus is not supported")
 			return temp, errors.New("type of apdus is not supported")
 		}
 	}
@@ -690,14 +690,14 @@ func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []
 			{0x80, 0x02, 0x00, 0x00, 0x06, 0x41, 0x04, 0x00, 0x00, 0x00, 0x02},
 		}
 		for j, cmd := range cmds {
-			edgeXLog.Infof("Transmit c-apdu: % x\n", cmd)
+			edgeXLog.Infof("Transmit c-apdu: % x", cmd)
 			rsp, err := card.Transmit(cmd)
 			if err != nil {
 				//todo应当对外通知此reader存在异常
 				edgeXLog.Warnf("reader:%s Transmit apdu err:%s", reader, err)
 				break
 			}
-			edgeXLog.Infof("Transmit r-apdu: % x\n", rsp)
+			edgeXLog.Infof("Transmit r-apdu: % x", rsp)
 			if j == 1 {
 				lenRsp := len(rsp)
 				//if rsp[lenRsp-1]==0x90&&rsp[lenRsp-2]==0x00 {
