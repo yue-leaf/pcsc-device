@@ -90,6 +90,7 @@ func InitLogger(config LogConfig) {
 	zerolog.TimestampFieldName = "timestamp"
 	zerolog.LevelFieldName = "logLevel"
 	zerolog.MessageFieldName = "payload"
+	zerolog.CallerFieldName = "funcName"
 	zerolog.CallerMarshalFunc = func(pc uintptr, file string, line int) string {
 		return filepath.Base(file) + ":" + strconv.Itoa(line)
 	}

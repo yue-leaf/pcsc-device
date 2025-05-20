@@ -12,6 +12,7 @@ import (
 	"github.com/edgexfoundry/device-sdk-go/v4"
 	"github.com/edgexfoundry/device-sdk-go/v4/pkg/startup"
 	"github.com/edgexfoundry/device-simple/driver"
+	//_ "net/http/pprof"
 )
 
 const (
