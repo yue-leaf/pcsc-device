@@ -237,6 +237,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 	var reqBody apduReqBody
 	var cmds [][]byte
 	var cmdsResults [][]byte
+	//t1 := time.Now()
 	for i, req := range reqs {
 		edgeXLog := log.NewEdgeXLog(s.lc)
 
@@ -322,7 +323,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 			}
 		}
 	}
-
+	//fmt.Println("总耗时：", time.Now().Sub(t1))
 	return nil
 }
 
@@ -814,6 +815,13 @@ func (s *PcscDriver) getReadyCard(edgeXLog *log.EdgeXLogHook, reader string, ctx
 		edgeXLog.Warnf("Pcsc Resource Manager lost.Recover during getting ready card.Need to reseach.")
 	}
 	if ctx != nil {
+		//scard.ShareExclusive在各类读卡器上兼容性强，确保独占，同时只可一个应用连接卡片
+		//scard.ShareShared多应用共享访问，可实现实时监听状态变化
+		//scard.ShareDirect直接访问或实时控制底层协议，需提前验证设备兼容性
+		//scard.ProtocolT0每次传输1字节，通信开销大，早期设备采用此方式，兼容性强
+		//scard.ProtocolT1基于块的异步传输，效率高，需设备支持块传输
+		//scard.ProtocolAny自动检测由智能卡接口自动协商
+		//card, err = ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
 		card, err = ctx.Connect(reader, scard.ShareExclusive, scard.ProtocolAny)
 		if err != nil {
 			//todo应当对外通知此reader存在异常
@@ -838,6 +846,10 @@ func (s *PcscDriver) putReadyCard(edgeXLog *log.EdgeXLogHook, reader string, car
 
 func (s *PcscDriver) closeCardConnection(edgeXLog *log.EdgeXLogHook, card *scard.Card) {
 	if card != nil {
+		//连续操作场景：选择 LeaveCard，避免重复连接开销。
+		//状态重置需求：选择 ResetCard，用于初始化或恢复卡片状态。
+		//临时暂停场景：选择 UnpowerCard，在不弹出卡片的情况下断电保护。
+		//操作结束场景：选择 EjectCard，确保卡片安全移除，适合用户交互流程。
 		err := card.Disconnect(scard.ResetCard)
 		if err != nil {
 			edgeXLog.Warnf("release card connetion meet err,%v", err)

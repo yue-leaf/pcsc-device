@@ -12,6 +12,7 @@ import (
 	"github.com/edgexfoundry/device-sdk-go/v4"
 	"github.com/edgexfoundry/device-sdk-go/v4/pkg/startup"
 	"github.com/edgexfoundry/device-simple/driver"
+	//pprof时需要
 	//_ "net/http/pprof"
 )
 
@@ -20,6 +21,14 @@ const (
 )
 
 func main() {
+	//pprof时需要
+	//go func() {
+	//	http.ListenAndServe("localhost:6060", nil)
+	//}()
+	//锁阻塞分析
+	//runtime.SetBlockProfileRate(100)
+	//锁竞争分析
+	//runtime.SetMutexProfileFraction(1)
 	sd := driver.PcscDriver{}
 	startup.Bootstrap(serviceName, device.Version, &sd)
 }
