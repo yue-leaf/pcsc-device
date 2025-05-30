@@ -274,7 +274,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 					edgeXLog.Warn("apdus is nil, stop execution")
 					return errors.New("empty apdus")
 				}
-				edgeXLog.Infof("Transmit c-apdu:%v ", cmds)
+				edgeXLog.Infof("Transmit c-apdu:%x ", cmds)
 				currCard, b := s.getSerialNumberMap(deviceName)
 				if b {
 					//通过轻量锁控制实现
@@ -299,7 +299,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 					s.putReadyCard(&edgeXLog, currCard.Reader, card)
 					//原实现
 					//closeCardConnection(card)
-					edgeXLog.Infof("r-apdu:%v", cmdsResults)
+					edgeXLog.Infof("r-apdu:%x", cmdsResults)
 				} else {
 					all := s.getAllSerialNumberReaderMap()
 					edgeXLog.Warnf("no device:%s in devices readers Map%s", deviceName, all)
