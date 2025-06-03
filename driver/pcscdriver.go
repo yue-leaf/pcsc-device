@@ -197,12 +197,12 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 						edgeXLog.Warn("apdus is nil, stop execution")
 						return nil, errors.New("empty apdus")
 					}
-					edgeXLog.Debugf("Transmit c-apdu: % x", cmd)
+					edgeXLog.Debugf("Transmit c-apdu: %x", cmd)
 					result, err := card.Transmit(cmd)
 					if err != nil {
 						edgeXLog.Warnf("Device %s Transmit Apdu err:%v", deviceName, err)
 					}
-					edgeXLog.Debugf("r-apdu: % x", result)
+					edgeXLog.Debugf("r-apdu: %x", result)
 					cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
 				} else {
 					all := s.getAllSerialNumberReaderMap()
@@ -240,7 +240,7 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 	//t1 := time.Now()
 	for i, req := range reqs {
 		edgeXLog := log.NewEdgeXLog(s.lc)
-
+		edgeXLog.Infof("get request:%v", req)
 		//lc := log.GetLoggerWithTrace(reqBody.RequestId)
 		//lc := s.lc.Hook(edgeXLog).With().Logger()
 
@@ -337,6 +337,9 @@ func (s *PcscDriver) Stop(force bool) error {
 	if s.lc != nil {
 		edgeXLog.Warnf("PcscDriver.Stop called: force=%v", force)
 	}
+	oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
+	edgeXLog.Info("modify all devices to down")
+	s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
 	log.Close()
 	return s.client.Release()
 }
@@ -698,7 +701,7 @@ func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []
 				edgeXLog.Warnf("reader:%s Transmit apdu err:%s", reader, err)
 				break
 			}
-			edgeXLog.Infof("Transmit r-apdu: % x", rsp)
+			edgeXLog.Infof("Transmit r-apdu: %x", rsp)
 			if j == 1 {
 				lenRsp := len(rsp)
 				//if rsp[lenRsp-1]==0x90&&rsp[lenRsp-2]==0x00 {
