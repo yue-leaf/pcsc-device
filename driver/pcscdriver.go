@@ -337,9 +337,9 @@ func (s *PcscDriver) Stop(force bool) error {
 	if s.lc != nil {
 		edgeXLog.Warnf("PcscDriver.Stop called: force=%v", force)
 	}
-	//oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
-	//edgeXLog.Info("modify all devices to down")
-	//s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
+	oldSerialNumberReaderMap := s.getAllSerialNumberReaderMap()
+	edgeXLog.Infof("modify all devices to down:%s", oldSerialNumberReaderMap)
+	s.deleteOldDevice(&edgeXLog, oldSerialNumberReaderMap, []string{})
 	log.Close()
 	return s.client.Release()
 }
