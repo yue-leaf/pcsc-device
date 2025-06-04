@@ -202,7 +202,7 @@ func (s *PcscDriver) HandleReadCommands(deviceName string, protocols map[string]
 					if err != nil {
 						edgeXLog.Warnf("Device %s Transmit Apdu err:%v", deviceName, err)
 					}
-					edgeXLog.Debugf("r-apdu: %x", result)
+					edgeXLog.Debugf("Transmit r-apdu: %x", result)
 					cv, _ = sdkModels.NewCommandValue(req.DeviceResourceName, common.ValueTypeBinary, result)
 				} else {
 					all := s.getAllSerialNumberReaderMap()
@@ -240,11 +240,11 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 	//t1 := time.Now()
 	for i, req := range reqs {
 		edgeXLog := log.NewEdgeXLog(s.lc)
-		edgeXLog.Infof("get request:%v", req)
+		//edgeXLog.Infof("receive requestBody:%s", params[i])
 		//lc := log.GetLoggerWithTrace(reqBody.RequestId)
 		//lc := s.lc.Hook(edgeXLog).With().Logger()
 
-		edgeXLog.Debugf("PcscDriver.HandleWriteCommands: protocols: %v, resource: %v, parameters: %v, attributes: %v", protocols, reqs[i].DeviceResourceName, params[i], reqs[i].Attributes)
+		edgeXLog.Infof("receive new request, protocols: %v, resource: %v, parameters: %v, attributes: %v", protocols, reqs[i].DeviceResourceName, params[i], reqs[i].Attributes)
 		//check Resource is existing
 		_, ok := s.sdk.DeviceResource(deviceName, req.DeviceResourceName)
 		if !ok {
@@ -280,8 +280,8 @@ func (s *PcscDriver) HandleWriteCommands(deviceName string, protocols map[string
 					//通过轻量锁控制实现
 					card := s.getReadyCard(&edgeXLog, currCard.Reader, s.client)
 					if card == nil {
-						edgeXLog.Warnf("RequestId:%s,get ready card fail", reqBody.RequestId)
 						s.putReadyCard(&edgeXLog, currCard.Reader, card)
+						edgeXLog.Warnf("RequestId:%s,get ready card fail", reqBody.RequestId)
 						return errors.New("get no ready card")
 					}
 					cmdsResults = make([][]byte, len(cmds))
@@ -337,9 +337,9 @@ func (s *PcscDriver) Stop(force bool) error {
 	if s.lc != nil {
 		edgeXLog.Warnf("PcscDriver.Stop called: force=%v", force)
 	}
-	oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
-	edgeXLog.Info("modify all devices to down")
-	s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
+	//oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
+	//edgeXLog.Info("modify all devices to down")
+	//s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
 	log.Close()
 	return s.client.Release()
 }
@@ -402,23 +402,23 @@ func (s *PcscDriver) Discover() error {
 			ctx, err2 := scard.EstablishContext()
 			if err2 != nil {
 				edgeXLog.Warnf("Fail to list Readers,err:%s,and hard to recover by getting pcsc ResourceManager,err:%s", err, err2)
-				oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
+				oldSerialNumberReaderMap := s.getAllSerialNumberReaderMap()
 				edgeXLog.Info("modify all devices to down")
-				s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
+				s.deleteOldDevice(&edgeXLog, oldSerialNumberReaderMap, []string{})
 				return err
 			}
 			pcscResourceManagerContext, s.client = ctx, ctx
 			readers, err2 = pcscResourceManagerContext.ListReaders()
 			if err != nil {
 				edgeXLog.Warnf("Fail to list Readers,err:%s,and  recover by getting pcsc ResourceManager successfully,but still fail to list Readers,err:%s", err, err2)
-				oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
+				oldSerialNumberReaderMap := s.getAllSerialNumberReaderMap()
 				edgeXLog.Info("modify all devices to down")
-				s.deleteOldDevice(&edgeXLog, oldserialNumberReaderMap, []string{})
+				s.deleteOldDevice(&edgeXLog, oldSerialNumberReaderMap, []string{})
 				return err2
 			}
 		}
 	}
-	edgeXLog.Infof("find readers:%v", readers)
+	edgeXLog.Infof("find readers:%s", readers)
 	//通过readerCh作为轻量锁，来传递reader是否可用
 	for _, reader := range readers {
 		if _, ok := s.readerCh[reader]; !ok {
@@ -649,7 +649,7 @@ func (s *PcscDriver) parseApdus(edgeXLog *log.EdgeXLogHook, rawApdus interface{}
 }
 
 func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []string, ctx *scard.Context) {
-	lastestSerialNumberList := make([]string, len(readers))
+	latestSerialNumberList := make([]string, len(readers))
 	serialNumberMap := make(map[string]usafecard.USafeCard, len(readers))
 	oldserialNumberReaderMap := s.getAllSerialNumberReaderMap()
 	for i, reader := range readers {
@@ -694,7 +694,7 @@ func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []
 			{0x80, 0x02, 0x00, 0x00, 0x06, 0x41, 0x04, 0x00, 0x00, 0x00, 0x02},
 		}
 		for j, cmd := range cmds {
-			edgeXLog.Infof("Transmit c-apdu: % x", cmd)
+			edgeXLog.Infof("Transmit c-apdu: %x", cmd)
 			rsp, err := card.Transmit(cmd)
 			if err != nil {
 				//todo应当对外通知此reader存在异常
@@ -715,12 +715,12 @@ func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []
 					if currCard, b := s.getSerialNumberMap(serialNumber); b && currCard.OperatingState == models.Up && currCard.Reader == reader {
 						//serialNumberList[i] = ""
 						//serialNumberList[i] = serialNumber
-						lastestSerialNumberList[i] = serialNumber
+						latestSerialNumberList[i] = serialNumber
 					} else {
 						//SerialNumberMap中获取不到的或者reader不一致的表示之前被拔除过
 						//s.setSerialNumberMap(serialNumber, usafecard.USafeCard{Reader: reader, OperatingState: models.Up})
 						serialNumberMap[serialNumber] = usafecard.USafeCard{Reader: reader, OperatingState: models.Up}
-						lastestSerialNumberList[i] = serialNumber
+						latestSerialNumberList[i] = serialNumber
 					}
 				}
 			}
@@ -729,7 +729,7 @@ func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []
 		s.putReadyCard(edgeXLog, reader, card)
 	}
 
-	edgeXLog.Infof("the lastest devices list,%v", oldserialNumberReaderMap)
+	edgeXLog.Infof("the old devices list,%s", oldserialNumberReaderMap)
 	//todo此时设备要是又拔了会有问题，但是多少有点离谱
 	//管理可用设备
 	res := make([]sdkModels.DiscoveredDevice, 0, 1)
@@ -761,7 +761,7 @@ func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []
 	//管理被拔除的设备——状态置为down
 	//todo还需管理channel
 	//timeNow := time.Now().String()
-	s.deleteOldDevice(edgeXLog, oldserialNumberReaderMap, lastestSerialNumberList)
+	s.deleteOldDevice(edgeXLog, oldserialNumberReaderMap, latestSerialNumberList)
 	//避免过于频繁的设备扫描,等待设备稳定,部分设备发现过程耗时较久
 	//time.Sleep(time.Duration(s.serviceConfig.PcscCustom.Writable.DiscoverSleepDurationSecs) * time.Second)
 	//PublishDeviceDiscoveryProgressSystemEvent用于发布设备发现进度的系统事件，50：表示当前设备发现的进度百分比，len(res)设备数量
@@ -771,6 +771,7 @@ func (s *PcscDriver) discoverSerialNumber(edgeXLog *log.EdgeXLogHook, readers []
 	if len(res) > 0 {
 		s.deviceCh <- res
 	}
+	edgeXLog.Infof("update device list completely the latest devices list:%s", latestSerialNumberList)
 	//s.deleteOldDevice(oldserialNumberReaderMap, serialNumberList)
 
 }
@@ -871,12 +872,12 @@ func ContainElement[T comparable](slice []T, element T) bool {
 	return false
 }
 
-func (s *PcscDriver) deleteOldDevice(edgeXLog *log.EdgeXLogHook, oldserialNumberReaderMap map[string]usafecard.USafeCard, lastestSerialNumberList []string) {
+func (s *PcscDriver) deleteOldDevice(edgeXLog *log.EdgeXLogHook, oldserialNumberReaderMap map[string]usafecard.USafeCard, latestSerialNumberList []string) {
 	//管理被拔除的设备——状态置为down
 	//todo还需管理channel
 	//timeNow := time.Now().String()
 	for old, _ := range oldserialNumberReaderMap {
-		if !ContainElement[string](lastestSerialNumberList, old) {
+		if !ContainElement[string](latestSerialNumberList, old) {
 			//proto := make(map[string]models.ProtocolProperties)
 			//proto["pcsc"] = map[string]any{"SerialNumber": old}
 			//res = append(res, sdkModels.DiscoveredDevice{
