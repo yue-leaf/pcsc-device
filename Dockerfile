@@ -31,7 +31,7 @@ ARG MAKE=make build
 
 ENV TZ=Asia/Shanghai
 RUN apk add --update --no-cache ${ALPINE_PKG_BASE} ${ALPINE_PKG_EXTRA}
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
         apk update && \
         apk add --no-cache git gcc musl-dev pkgconfig pcsc-lite-dev
 #RUN apk add --no-cache libpcsclite-dev
@@ -65,7 +65,7 @@ LABEL license='SPDX-License-Identifier: Apache-2.0' \
 
 ENV TZ=Asia/Shanghai
 ENV EDGEX_SECURITY_SECRET_STORE=false
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
     apk update && \
     apk add ca-certificates tzdata pcsc-lite pcsc-lite-libs ccid && \
     rm -rf /var/cache/apk/*
