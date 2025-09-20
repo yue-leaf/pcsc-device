@@ -16,8 +16,8 @@
 #
 
 #ARG BASE=golang:1.23-alpine3.20
-ARG BASE=registry.cn-shanghai.aliyuncs.com/snowballtech/golang:1.23-alpine3.20
-FROM ${BASE} AS builder
+ARG BASE=golang:1.23-alpine3.20
+FROM --platform=$BUILDPLATFORM ${BASE} AS builder
 
 # 设置 Go 模块代理
 ENV GO111MODULE=on
@@ -56,7 +56,7 @@ RUN ${MAKE}
 #    find /app -name "pcsc-device-hsm"
 
 # Next image - Copy built Go binary into new workspace
-FROM registry.cn-shanghai.aliyuncs.com/snowballtech/alpine:3.20
+FROM alpine:3.20
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2022: Intel'
 
