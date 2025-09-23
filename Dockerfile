@@ -17,7 +17,7 @@
 
 #ARG BASE=golang:1.23-alpine3.20
 ARG BASE=golang:1.23-alpine3.20
-FROM --platform=$BUILDPLATFORM ${BASE} AS builder
+FROM ${BASE} AS builder
 
 # 设置 Go 模块代理
 ENV GO111MODULE=on
