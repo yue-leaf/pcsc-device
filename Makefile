@@ -39,7 +39,7 @@ tidy:
 # CGO is enabled by default and cause docker builds to fail due to no gcc,
 # but is required for test with -race, so must disable it for the builds only
 $(MICROSERVICES):
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1  go build $(GOFLAGS) -a -tags netgo -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -lpcsclite"' -o ./cmd/$(MICROSERVICES).bin  ./cmd
+	CGO_ENABLED=1  go build $(GOFLAGS) -a -tags netgo -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -lpcsclite"' -o ./cmd/$(MICROSERVICES).bin  ./cmd
 	chmod +x ./cmd/$(MICROSERVICES).bin  # 确保builder阶段生成的文件可执行
 # $(MICROSERVICES):
 # 	GOOS=$(ENVOS) GOARCH=$(ARCH) CGO_ENABLED=1  go build $(GOFLAGS) -a -ldflags '-extldflags "-static"' -o ./cmd/$(MICROSERVICES).bin  ./cmd
