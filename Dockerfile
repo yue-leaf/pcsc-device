@@ -1,8 +1,4 @@
-# ---------------------------------------------------------------------------------------
-# 第一阶段：构建 (builder)
-# 使用 Go 官方镜像作为构建环境，该镜像已预装 Go 和常用的构建工具，省去了手动安装的步骤。
-# ---------------------------------------------------------------------------------------
-FROM golang:1.23.12-bullseye AS builder
+FROM ubuntu:22.04 AS builder
 
 # 设置构建参数
 ARG TARGETARCH
@@ -12,9 +8,10 @@ ENV GOOS=$TARGETOS
 ENV GOARCH=$TARGETARCH
 
 # 设置时区和必要的系统依赖
-# 注意：这里我们只安装构建所需的最小依赖
+# 安装 Go 语言和构建依赖
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    wget \
     make \
     git \
     pkg-config \
@@ -25,9 +22,22 @@ RUN apt-get update && \
     tzdata && \
     rm -rf /var/lib/apt/lists/*
 
+# 安装特定版本的 Go 语言
+# 您可以根据需要调整 Go 版本
+ENV GO_VERSION=1.23.12
+RUN wget -O go.tar.gz https://golang.google.cn/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz && \
+    tar -C /usr/local -xzf go.tar.gz && \
+    rm go.tar.gz
+
+# 设置 Go 环境变量
+ENV PATH=/usr/local/go/bin:$PATH
+ENV GOPATH=/go
+ENV GOBIN=/go/bin
+
 # 设置 Go 模块代理和私有仓库
 ENV GO111MODULE=on
 ENV GOPROXY=https://goproxy.cn,https://gocenter.io,https://goproxy.io,direct
+
 WORKDIR /app
 
 # 拷贝并下载 Go 模块依赖
@@ -43,16 +53,14 @@ RUN go build -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -l
 
 # ---------------------------------------------------------------------------------------
 # 第二阶段：运行 (final)
-# 使用更小、更安全的 Debian slim 镜像作为基础，只包含运行时所需的依赖。
 # ---------------------------------------------------------------------------------------
-FROM debian:bullseye-slim
+FROM ubuntu:22.04
 
 # 设置时区
 ENV TZ=Asia/Shanghai
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 安装运行时依赖
-# 这里只安装 pcsc-lite 和 libusb，这是最终程序运行所必需的。
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     libpcsclite1 \
@@ -66,9 +74,6 @@ COPY --from=builder /app/cmd/pcsc-device-hsm.bin /usr/local/bin/pcsc-device-hsm
 
 # 确保二进制文件可执行
 RUN chmod +x /usr/local/bin/pcsc-device-hsm
-
-# 暴露端口，如果您的应用需要
-# EXPOSE 8080
 
 # 容器启动时运行的命令
 ENTRYPOINT ["/usr/local/bin/pcsc-device-hsm"]
