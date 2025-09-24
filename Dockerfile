@@ -2,7 +2,7 @@
 # 第一阶段：构建 (builder)
 # 使用 Go 官方镜像作为构建环境，该镜像已预装 Go 和常用的构建工具，省去了手动安装的步骤。
 # ---------------------------------------------------------------------------------------
-FROM golang:1.25.1-bullseye AS builder
+FROM golang:1.23.12-bullseye AS builder
 
 # 设置构建参数
 ARG TARGETARCH
