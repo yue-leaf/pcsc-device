@@ -1,4 +1,7 @@
 FROM ubuntu:22.04 AS builder
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+
 
 # 设置构建参数
 ARG TARGETARCH
@@ -55,6 +58,7 @@ RUN go build -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -l
 # 第二阶段：运行 (final)
 # ---------------------------------------------------------------------------------------
 FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
 
 # 设置时区
 ENV TZ=Asia/Shanghai
