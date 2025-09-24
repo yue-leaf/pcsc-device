@@ -19,14 +19,15 @@ ARG UBUNTU_PKG_EXTRA="gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-ar
 ENV TZ=Asia/Shanghai
 
 # 安装系统依赖 + C开发库
-RUN sed -i 's@/archive.ubuntu.com/@/mirrors.aliyun.com/@g' /etc/apt/sources.list && \
-    sed -i 's@/security.ubuntu.com/@/mirrors.aliyun.com/@g' /etc/apt/sources.list && \
+RUN RUN echo "Types: deb\nURIs: https://mirrors.aliyun.com/ubuntu/\nSuites: noble noble-security noble-updates noble-proposed noble-backports\nComponents: main restricted universe multiverse\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg" | tee /etc/apt/sources.list.d/aliyun.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         ${UBUNTU_PKG_BASE} \
         ${UBUNTU_PKG_EXTRA} \
         musl-dev \
         libpcsclite-dev \
+        libpcsclite-dev:arm64 \
+        libusb-1.0-0-dev:arm64 \
         libusb-1.0-0-dev \
         tzdata && \
     update-ca-certificates && \
