@@ -3,9 +3,11 @@ FROM ubuntu:22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG TARGETOS
+ARG TARGETARCH
+
 # Go版本和架构配置
 ARG GO_VERSION=1.25.1
-ARG GO_ARCH=amd64
 ENV GOROOT=/usr/local/go
 ENV GOPATH=/go
 ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
@@ -38,10 +40,11 @@ RUN sed -i s@/archive.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list &
 
 # 下载并安装Go
 RUN echo "Downloading Go ${GO_VERSION} (${GO_ARCH}) from aliyun..." && \
-    wget -v --no-check-certificate https://mirrors.aliyun.com/golang/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
-    tar -C /usr/local -xzf go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
-    rm -f go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
-    go version
+    wget -v --no-check-certificate https://mirrors.aliyun.com/golang/go${GO_VERSION}.linux-$TARGETARCH.tar.gz && \
+    tar -C /usr/local -xzf go${GO_VERSION}.linux-$TARGETARCH.tar.gz && \
+    rm -f go${GO_VERSION}.linux-$TARGETARCH.tar.gz && \
+    go version && \
+    go env
 
 # 项目构建
 WORKDIR /app
@@ -49,8 +52,8 @@ LABEL license='SPDX-License-Identifier: Apache-2.0' \
   copyright='Copyright (c) 2023: Intel' \
   Name=pcsc-device-hsm Version=${VERSION}
 
-COPY go.mod vendor* ./
-RUN [ ! -d "vendor" ] && go mod download all || echo "skipping vendor download..."
+COPY go.mod  ./
+RUN go mod download all
 
 COPY . .
 RUN CGO_ENABLED=1  go build -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -lpcsclite"' -o ./cmd/pcsc-device-hsm.bin && chmod +x ./cmd/pcsc-device-hsm.bin
