@@ -15,7 +15,7 @@ ENV GOPROXY=https://goproxy.cn,https://gocenter.io,https://goproxy.io,direct
 ENV GOPRIVATE=gitlab.snowballtech.com
 
 ARG UBUNTU_PKG_BASE="make git gcc g++ pkg-config wget curl ca-certificates libc6-dev"
-ARG UBUNTU_PKG_EXTRA="gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf"
+ARG UBUNTU_PKG_EXTRA="gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross"
 ENV TZ=Asia/Shanghai
 
 # 安装系统依赖 + C开发库
