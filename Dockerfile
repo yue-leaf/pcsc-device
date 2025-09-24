@@ -1,58 +1,91 @@
-# =========================
-# 构建阶段：Ubuntu 24.04 + CGO
-# =========================
-FROM ubuntu:24.04 AS builder
+# 构建阶段：Ubuntu 24.04 + 完整C开发环境
+FROM ubuntu:22.04 AS builder
+
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Go版本和架构配置
 ARG GO_VERSION=1.25.1
 ARG GO_ARCH=amd64
 ENV GOROOT=/usr/local/go
 ENV GOPATH=/go
-ENV PATH=$GOROOT/bin:$GOPATH/bin:$PATH
+ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
 
+# Go模块代理和私有仓库
 ENV GO111MODULE=on
 ENV GOPROXY=https://goproxy.cn,https://gocenter.io,https://goproxy.io,direct
 ENV GOPRIVATE=gitlab.snowballtech.com
 
+# 基础参数：添加libc6-dev（C标准库开发包）
 ARG UBUNTU_PKG_BASE="make git gcc g++ pkg-config wget curl ca-certificates libc6-dev"
-ARG UBUNTU_PKG_EXTRA="gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross"
+ARG UBUNTU_PKG_EXTRA=""
+ARG ADD_BUILD_TAGS=""
+ARG MAKE=make build
 ENV TZ=Asia/Shanghai
 
-# 安装系统依赖 + C开发库
-RUN RUN echo "Types: deb\nURIs: https://mirrors.aliyun.com/ubuntu/\nSuites: noble noble-security noble-updates noble-proposed noble-backports\nComponents: main restricted universe multiverse\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg" | tee /etc/apt/sources.list.d/aliyun.sources && \
+# 安装系统依赖（包含C开发库）
+RUN sed -i s@/archive.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list && \
+    sed -i s@/security.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        ${UBUNTU_PKG_BASE} \
-        ${UBUNTU_PKG_EXTRA} \
-        musl-dev \
-        libpcsclite-dev \
-        libpcsclite-dev:arm64 \
-        libusb-1.0-0-dev:arm64 \
-        libusb-1.0-0-dev \
-        tzdata && \
+    ${UBUNTU_PKG_BASE} \
+    ${UBUNTU_PKG_EXTRA} \
+    musl-dev \
+    libpcsclite-dev \
+    libusb-1.0-0-dev \
+    tzdata && \
     update-ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# 下载并安装 Go
-RUN wget -q --no-check-certificate https://mirrors.aliyun.com/golang/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
+# 下载并安装Go
+RUN echo "Downloading Go ${GO_VERSION} (${GO_ARCH}) from aliyun..." && \
+    wget -v --no-check-certificate https://mirrors.aliyun.com/golang/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
     tar -C /usr/local -xzf go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
     rm -f go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
     go version
 
-# 构建项目
+# 项目构建
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
+LABEL license='SPDX-License-Identifier: Apache-2.0' \
+  copyright='Copyright (c) 2023: Intel' \
+  Name=pcsc-device-hsm Version=${VERSION}
 
-ARG GIT_SHA=""
-# 构建多架构二进制
-RUN set -eux; \
-    # amd64
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -a -tags netgo \
-        -ldflags "-extldflags '-Wl,-O2 -L/usr/lib -L/usr/local/lib -lpcsclite' -X main.gitSha=${GIT_SHA}" \
-        -o /app/bin/pcsc-device-hsm.amd64 ./cmd; \
-    # arm64
-    GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -a -tags netgo \
-        -ldflags "-extldflags '-Wl,-O2 -L/usr/lib -L/usr/local/lib -lpcsclite' -X main.gitSha=${GIT_SHA}" \
-        -o /app/bin/pcsc-device-hsm.arm64 ./cmd
+COPY go.mod vendor* ./
+RUN [ ! -d "vendor" ] && go mod download all || echo "skipping vendor download..."
+
+COPY . .
+RUN CGO_ENABLED=1  go build -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -lpcsclite"' -o ./cmd/pcsc-device-hsm.bin && chmod +x ./cmd/pcsc-device-hsm.bin
+
+# 运行阶段：Ubuntu 24.04
+FROM ubuntu:22.04
+LABEL license='SPDX-License-Identifier: Apache-2.0' \
+  copyright='Copyright (c) 2022: Intel'
+
+ENV TZ=Asia/Shanghai
+ENV EDGEX_SECURITY_SECRET_STORE=false
+
+# 安装运行时依赖
+RUN sed -i s@/archive.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list && \
+    sed -i s@/security.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    pcscd \
+    libpcsclite1 \
+    libusb-1.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# 复制构建产物
+WORKDIR /pcsc-device-hsm/cmd/
+COPY --from=builder /app/cmd/res ./res
+COPY --from=builder /app/cmd/pcsc-device-hsm.bin ./pcsc-device-hsm.bin
+
+# 非root用户配置
+RUN groupadd -r scard && useradd -r -g scard pcsc-device-hsm && \
+    chown -R pcsc-device-hsm:scard /pcsc-device-hsm
+
+EXPOSE 59999
+USER pcsc-device-hsm
+
+ENTRYPOINT ["/pcsc-device-hsm/cmd/pcsc-device-hsm.bin"]
+CMD ["-cp=keeper.http://edgex-core-keeper:59890", "--registry"]
