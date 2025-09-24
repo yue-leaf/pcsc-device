@@ -28,7 +28,6 @@ RUN apt-get update && \
 # 设置 Go 模块代理和私有仓库
 ENV GO111MODULE=on
 ENV GOPROXY=https://goproxy.cn,https://gocenter.io,https://goproxy.io,direct
-ENV GOPRIVATE=gitlab.snowballtech.com
 WORKDIR /app
 
 # 拷贝并下载 Go 模块依赖
