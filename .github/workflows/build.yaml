@@ -8,8 +8,7 @@ on:
       - 'v*.*.*'
 
 env:
-  DOCKERHUB_USERNAME: YOUR_DOCKERHUB_USERNAME
-  IMAGE_NAME: pcsc-device-hsm
+  IMAGE_NAME: pcsc-device
   GO_VERSION: 1.25.1
 
 jobs:
@@ -34,7 +33,7 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64
           build-args: |
             GO_VERSION=${{ env.GO_VERSION }}
             TARGETARCH=amd64
@@ -60,7 +59,7 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
           build-args: |
             GO_VERSION=${{ env.GO_VERSION }}
             TARGETARCH=arm64
@@ -80,7 +79,7 @@ jobs:
       - name: Create and push manifest
         run: |
           # 定义基础镜像名和两个架构的标签
-          IMAGE_BASE=${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          IMAGE_BASE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           TAG=${{ github.sha }}
 
           # 使用 docker manifest 创建并推送 multi-arch manifest
