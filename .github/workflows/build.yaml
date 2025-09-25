@@ -1,76 +1,95 @@
-name: Build and Push Multi-Arch Docker Image (Separate Jobs)
+name: Build and Push Multi-Arch Image (Build Outside Dockerfile)
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
 
 env:
   IMAGE_NAME: pcsc-device
-  GO_VERSION: 1.25.1
+  GO_VERSION: 1.23.12
 
 jobs:
   build_amd64:
-    name: Build on AMD64
-    runs-on: ubuntu-22.04  # 使用默认的 AMD64 runner
-
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Login to Docker Hub
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y \
+          libpcsclite-dev libusb-1.0-0-dev pkg-config make
+
+      - name: Build binary (amd64)
+        run: |
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \
+            go build -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -lpcsclite"' \
+            -o pcsc-device-hsm ./cmd/pcsc-device-hsm
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcsc-device-hsm-amd64
+          path: pcsc-device-hsm
+
+      - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push AMD64 image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64
-          build-args: |
-            GO_VERSION=${{ env.GO_VERSION }}
-            TARGETARCH=amd64
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64 .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64
 
   build_arm64:
-    name: Build on ARM64
-    runs-on: ubuntu-22.04-arm # 或者使用 self-hosted runner
-
+    runs-on: ubuntu-22.04-arm
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Login to Docker Hub
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y \
+          libpcsclite-dev libusb-1.0-0-dev pkg-config make
+
+      - name: Build binary (arm64)
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=1 \
+            go build -ldflags '-extldflags "-Wl,--verbose -L/usr/lib -L/usr/local/lib -lpcsclite"' \
+            -o pcsc-device-hsm ./cmd/pcsc-device-hsm
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcsc-device-hsm-arm64
+          path: pcsc-device-hsm
+
+      - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push ARM64 image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          platforms: linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
-          build-args: |
-            GO_VERSION=${{ env.GO_VERSION }}
-            TARGETARCH=arm64
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64 .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
 
   create_manifest:
-    name: Create Multi-Arch Manifest
-    runs-on: ubuntu-latest
-    needs: [build_amd64, build_arm64] # 确保在两个构建任务都完成后执行
-
+    runs-on: ubuntu-22.04
+    needs: [build_amd64, build_arm64]
     steps:
-      - name: Login to Docker Hub
+      - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -78,15 +97,17 @@ jobs:
 
       - name: Create and push manifest
         run: |
-          # 定义基础镜像名和两个架构的标签
-          IMAGE_BASE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           TAG=${{ github.sha }}
 
-          # 使用 docker manifest 创建并推送 multi-arch manifest
-          docker manifest create ${IMAGE_BASE}:latest ${IMAGE_BASE}:${TAG}-amd64 ${IMAGE_BASE}:${TAG}-arm64
-          docker manifest push ${IMAGE_BASE}:latest
-          docker manifest create ${IMAGE_BASE}:${TAG} ${IMAGE_BASE}:${TAG}-amd64 ${IMAGE_BASE}:${TAG}-arm64
-          docker manifest push ${IMAGE_BASE}:${TAG}
+          docker manifest create $IMAGE:latest \
+            $IMAGE:${TAG}-amd64 \
+            $IMAGE:${TAG}-arm64
 
-          # 查看 manifest 结果
-          docker manifest inspect ${IMAGE_BASE}:latest
+          docker manifest push $IMAGE:latest
+
+          docker manifest create $IMAGE:${TAG} \
+            $IMAGE:${TAG}-amd64 \
+            $IMAGE:${TAG}-arm64
+
+          docker manifest push $IMAGE:${TAG}
