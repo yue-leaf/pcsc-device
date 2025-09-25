@@ -59,8 +59,8 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Install build deps
-        run: sudo add-apt-repository universe && \
-          sudo apt-get update && sudo apt-get install -y \
+        run: add-apt-repository universe && \
+          apt-get update && apt-get install -y \
           libpcsclite-dev libusb-1.0-0-dev pkg-config make
 
       - name: Build binary (arm64)
